@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 
@@ -10,6 +10,8 @@ export default function OnboardingPage() {
   const router = useRouter();
   const [step, setStep] = useState(0);
   const [saving, setSaving] = useState(false);
+  const [computing, setComputing] = useState(false);
+  const [computingDots, setComputingDots] = useState("");
 
   // Step 1 — Resume
   const fileRef = useRef<HTMLInputElement>(null);
@@ -44,6 +46,15 @@ export default function OnboardingPage() {
     }
   }
 
+  // Animate dots while computing
+  useEffect(() => {
+    if (!computing) return;
+    const id = setInterval(() => {
+      setComputingDots((d) => (d.length >= 3 ? "" : d + "."));
+    }, 500);
+    return () => clearInterval(id);
+  }, [computing]);
+
   async function handleFinish() {
     setSaving(true);
     try {
@@ -55,10 +66,28 @@ export default function OnboardingPage() {
         remote_preference: remotePreference,
         desired_salary_min: salaryMin ? parseInt(salaryMin) : null,
       });
-      router.push("/jobs");
     } finally {
       setSaving(false);
     }
+
+    // Show the computing screen and poll until embedding is done
+    setComputing(true);
+    const TIMEOUT_MS = 60_000;
+    const start = Date.now();
+    while (Date.now() - start < TIMEOUT_MS) {
+      await new Promise((r) => setTimeout(r, 2000));
+      try {
+        const { has_embedding } = await api.get<{ has_embedding: boolean }>("/jobs/matches/status");
+        if (has_embedding) {
+          router.push("/jobs");
+          return;
+        }
+      } catch {
+        // ignore transient errors, keep polling
+      }
+    }
+    // Timed out — go to jobs anyway, banner will be gone once worker catches up
+    router.push("/jobs");
   }
 
   const canAdvance = [
@@ -66,6 +95,25 @@ export default function OnboardingPage() {
     desiredTitles.trim().length > 0,            // Step 1: need at least one title
     true,                                       // Step 2: preferences optional
   ];
+
+  if (computing) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
+        <div className="w-full max-w-md text-center">
+          <div className="bg-white rounded-xl border border-gray-200 p-10 shadow-sm">
+            <div className="flex justify-center mb-6">
+              <div className="w-16 h-16 rounded-full border-4 border-brand-200 border-t-brand-600 animate-spin" />
+            </div>
+            <h2 className="text-xl font-bold text-gray-900 mb-2">Setting up your matches{computingDots}</h2>
+            <p className="text-sm text-gray-500">
+              We&apos;re building your profile embedding and ranking jobs against your background.
+              This should only take a moment. The page will update automatically.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">

@@ -101,6 +101,25 @@ export default function JobsPage() {
       .catch(() => router.push("/login"));
   }, [router]);
 
+  // Auto-poll every 3 s while embedding is still pending
+  useEffect(() => {
+    if (loading || status?.has_embedding) return;
+    const id = setInterval(async () => {
+      try {
+        const st = await api.get<MatchStatus>("/jobs/matches/status");
+        setStatus(st);
+        if (st.has_embedding) {
+          const matches = await api.get<Job[]>(`/jobs/matches?${buildParams({})}`);
+          setJobs(matches);
+          setOffset(matches.length);
+          setHasMore(matches.length === PAGE_SIZE);
+          clearInterval(id);
+        }
+      } catch { /* ignore */ }
+    }, 3000);
+    return () => clearInterval(id);
+  }, [loading, status?.has_embedding]);
+
   async function applyFilters() {
     await fetchMatches({
       minScore, title: titleFilter, company: companyFilter, remote: remoteFilter,
@@ -162,10 +181,11 @@ export default function JobsPage() {
         </div>
       )}
       {!loading && status?.profile_complete && !status.has_embedding && (
-        <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 mb-5">
+        <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 mb-5 flex items-center gap-3">
+          <div className="w-4 h-4 shrink-0 rounded-full border-2 border-blue-400 border-t-blue-700 animate-spin" />
           <p className="text-sm text-blue-800">
-            <span className="font-medium">Computing matches…</span>{" "}
-            Your profile is being embedded in the background. Refresh in a moment.
+            <span className="font-medium">Computing your matches…</span>{" "}
+            Hang tight, this only takes a moment. The page will update automatically.
           </p>
         </div>
       )}

@@ -22,7 +22,7 @@ def _upsert_jobs(jobs_data: list[dict]) -> tuple[int, int]:
     Persist a list of job dicts into the database.
     Returns (new_count, updated_count).
     """
-    from app.database import AsyncSessionLocal
+    from app.database import task_session as AsyncSessionLocal
     from app.models.job import Job
     from app.tasks.embed_tasks import embed_job
     from sqlalchemy import select
@@ -125,7 +125,7 @@ def scrape_jobspy_all_profiles():
     Pull distinct desired_titles from all user profiles and spawn one
     scrape_jobspy task per unique title (capped at 30).
     """
-    from app.database import AsyncSessionLocal
+    from app.database import task_session as AsyncSessionLocal
     from app.services.scraping.jobspy_scraper import collect_search_terms_from_profiles
 
     async def _get_terms() -> list[str]:
@@ -158,7 +158,7 @@ def scrape_company_careers(self, company_id: int):
     """
     from datetime import datetime, timezone
 
-    from app.database import AsyncSessionLocal
+    from app.database import task_session as AsyncSessionLocal
     from app.models.company import Company
     from sqlalchemy import select
 
@@ -205,7 +205,7 @@ def scrape_all_company_careers():
     Fan-out: queue one scrape_company_careers task per active company.
     Called by Celery Beat alongside other scrapers.
     """
-    from app.database import AsyncSessionLocal
+    from app.database import task_session as AsyncSessionLocal
     from app.models.company import Company
     from sqlalchemy import select
 
@@ -228,7 +228,7 @@ def scrape_all_company_careers():
 @celery_app.task(name="app.tasks.scrape_tasks.seed_company_registry")
 def seed_company_registry():
     """One-shot task: populate the companies table from the built-in seed list."""
-    from app.database import AsyncSessionLocal
+    from app.database import task_session as AsyncSessionLocal
     from app.services.scraping.company_registry import seed_companies
 
     async def _inner() -> int:
