@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     embedding_model: str = "BAAI/bge-base-en-v1.5"
     embedding_dim: int = 768
 
+    admin_key: str = "dev-admin-key"
+
     anthropic_api_key: str | None = None
     scraper_proxy_url: str | None = None
 

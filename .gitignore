@@ -1,6 +1,7 @@
 # Environment
 .env
 .env.local
+.env.example
 
 # Python
 __pycache__/
@@ -29,3 +30,4 @@ Thumbs.db
 .idea/
 
 .claude
+.STRATEGY.md

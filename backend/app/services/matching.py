@@ -1,69 +1,85 @@
 """
-Vector similarity search using pgvector.
+Vector similarity search using pgvector ORM operators.
 Retrieves top-k jobs for a user profile, applies hard filters,
-and optionally re-ranks with LLM explanations.
+and upserts scored results into the matches table.
 """
 from datetime import datetime, timedelta, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, text
-from sqlalchemy.orm import selectinload
+from sqlalchemy import select, and_, or_
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.models.profile import Profile, RemotePreference
 from app.models.job import Job
 from app.models.match import Match
 
 
-async def compute_matches(user_id: int, db: AsyncSession, top_k: int = 100) -> list[Match]:
+async def compute_matches(user_id: int, db: AsyncSession, top_k: int = 100) -> int:
     """
-    Run vector similarity search for a user and upsert results into matches table.
-    Called by the Celery embed_tasks worker after profile embedding is updated.
+    Run pgvector cosine similarity search for a user and upsert results.
+    Uses SQLAlchemy ORM operators so the embedding is passed as a typed value,
+    not a raw string — avoiding asyncpg binding errors.
+
+    Returns the number of matches upserted.
     """
     result = await db.execute(select(Profile).where(Profile.user_id == user_id))
     profile = result.scalar_one_or_none()
 
     if not profile or profile.resume_embedding is None:
-        return []
+        return 0
 
-    # Build WHERE clause for hard filters
-    filters = ["j.scraped_at > NOW() - INTERVAL '30 days'"]
+    embedding = profile.resume_embedding  # list[float] stored by pgvector
+
+    # ── Hard filters ─────────────────────────────────────────────────────────
+    cutoff = datetime.now(timezone.utc) - timedelta(days=60)
+    conditions = [
+        Job.embedding.is_not(None),
+        Job.scraped_at > cutoff,
+    ]
 
     if profile.remote_preference == RemotePreference.REMOTE:
-        filters.append("j.is_remote = true")
+        conditions.append(Job.is_remote == True)
     elif profile.remote_preference == RemotePreference.ONSITE:
-        filters.append("j.is_remote = false")
+        conditions.append(Job.is_remote == False)
 
     if profile.desired_salary_min:
-        filters.append(f"(j.salary_max IS NULL OR j.salary_max >= {profile.desired_salary_min})")
+        # Allow jobs with no salary info OR jobs where max salary meets minimum
+        conditions.append(
+            or_(Job.salary_max.is_(None), Job.salary_max >= profile.desired_salary_min)
+        )
 
-    where_clause = " AND ".join(filters)
+    # ── Vector search via pgvector ORM cosine_distance operator ──────────────
+    # cosine_distance returns 0 (identical) → 2 (opposite); score = 1 - distance
+    stmt = (
+        select(
+            Job.id,
+            (1 - Job.embedding.cosine_distance(embedding)).label("score"),
+        )
+        .where(and_(*conditions))
+        .order_by(Job.embedding.cosine_distance(embedding))
+        .limit(top_k)
+    )
 
-    # pgvector cosine distance: <=> operator; lower = more similar
-    sql = text(f"""
-        SELECT j.id, 1 - (j.embedding <=> :embedding) AS score
-        FROM jobs j
-        WHERE j.embedding IS NOT NULL
-          AND {where_clause}
-        ORDER BY j.embedding <=> :embedding
-        LIMIT :top_k
-    """)
+    rows = (await db.execute(stmt)).all()
 
-    rows = (await db.execute(sql, {"embedding": str(profile.resume_embedding), "top_k": top_k})).all()
+    if not rows:
+        return 0
 
-    # Upsert matches
-    matches = []
-    for job_id, score in rows:
-        existing = (await db.execute(
-            select(Match).where(Match.user_id == user_id, Match.job_id == job_id)
-        )).scalar_one_or_none()
+    # ── Upsert matches using PostgreSQL ON CONFLICT ───────────────────────────
+    now = datetime.now(timezone.utc)
+    values = [
+        {"user_id": user_id, "job_id": job_id, "score": float(score), "computed_at": now}
+        for job_id, score in rows
+    ]
 
-        if existing:
-            existing.score = float(score)
-            existing.computed_at = datetime.now(timezone.utc)
-            matches.append(existing)
-        else:
-            m = Match(user_id=user_id, job_id=job_id, score=float(score))
-            db.add(m)
-            matches.append(m)
-
+    upsert_stmt = (
+        pg_insert(Match)
+        .values(values)
+        .on_conflict_do_update(
+            constraint="uq_matches_user_job",
+            set_={"score": pg_insert(Match).excluded.score, "computed_at": now},
+        )
+    )
+    await db.execute(upsert_stmt)
     await db.commit()
-    return matches
+
+    return len(rows)

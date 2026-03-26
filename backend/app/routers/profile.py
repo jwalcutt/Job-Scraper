@@ -66,12 +66,23 @@ async def update_profile(
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found")
 
+    # Fields that affect the embedding
+    EMBEDDING_FIELDS = {"desired_titles", "skills", "resume_text"}
     update_data = body.model_dump(exclude_none=True)
+    needs_reembed = bool(update_data.keys() & EMBEDDING_FIELDS)
+
     for field, value in update_data.items():
         setattr(profile, field, value)
 
+    if needs_reembed:
+        profile.resume_embedding = None  # invalidate; worker will recompute
+
     await db.commit()
     await db.refresh(profile)
+
+    if needs_reembed:
+        from app.tasks.embed_tasks import embed_profile
+        embed_profile.delay(profile.id)
 
     return ProfileResponse(
         **{c: getattr(profile, c) for c in ProfileResponse.model_fields if c != "has_resume"},

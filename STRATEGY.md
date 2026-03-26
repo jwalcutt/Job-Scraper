@@ -18,9 +18,9 @@ A web application that:
 
 | Phase | Scope | Status |
 |-------|-------|--------|
-| 1 | Core user profile + DB schema + API skeleton | 🔲 Not started |
-| 2 | Job ingestion pipeline (job board APIs + scraping) | 🔲 Not started |
-| 3 | Resume/job parsing + embedding generation | 🔲 Not started |
+| 1 | Core user profile + DB schema + API skeleton | ✅ Complete |
+| 2 | Job ingestion pipeline (job board APIs + scraping) | ✅ Complete |
+| 3 | Resume/job parsing + embedding generation | ✅ Complete |
 | 4 | Matching engine + ranked results API | 🔲 Not started |
 | 5 | Frontend web app | 🔲 Not started |
 | 6 | Scheduler + incremental refresh | 🔲 Not started |
@@ -191,7 +191,7 @@ Approach:
 
 - When a job is ingested: embed `title + company + description` → `jobs.embedding`
 - When a user updates their profile: embed `resume_text + desired_titles + skills` → `profiles.resume_embedding`
-- Model: `sentence-transformers/BAAI/bge-base-en-v1.5` (384-dim, fast, high quality)
+- Model: `sentence-transformers/BAAI/bge-base-en-v1.5` (768-dim, fast, high quality)
 - Run as Celery tasks so they don't block the API
 
 ### Step 2 — Candidate Retrieval (Fast)
@@ -311,7 +311,7 @@ job-scraper/
 
 ---
 
-## Phase 1 Implementation Plan (Current)
+## Phase 1 Implementation Plan (Complete)
 
 **Goal:** Scaffold the project, get a working API with user + profile CRUD, and a Postgres DB running locally.
 
@@ -329,18 +329,50 @@ Tasks:
 
 ---
 
-## Phase 2 Implementation Plan (Next)
+## Phase 2 Implementation Plan (Complete)
 
 **Goal:** Ingest real jobs into the `jobs` table.
 
 Tasks:
-- [ ] Celery worker setup with Redis broker
-- [ ] `greenhouse_scraper.py` — fetch all jobs from top 200 Greenhouse companies
-- [ ] `lever_scraper.py` — fetch from top 200 Lever companies
-- [ ] `jobspy_scraper.py` — keyword search on Indeed + ZipRecruiter based on desired titles from user profiles
-- [ ] Admin endpoint to trigger scrape jobs manually
-- [ ] Deduplication logic (hash on `source + external_id`)
-- [ ] Scheduled cron: refresh job listings every 24h
+- [x] Celery worker setup with Redis broker (`app/tasks/worker.py` + Beat schedule)
+- [x] `greenhouse_scraper.py` — 200+ companies, polite rate limiting, retry logic
+- [x] `lever_scraper.py` — 200+ companies, enriched description from lists sections
+- [x] `jobspy_scraper.py` — dynamic search terms pulled from user `desired_titles` via `collect_search_terms_from_profiles()`, capped at 30
+- [x] Admin router (`/admin/*`) with `X-Admin-Key` auth for manual scrape triggers + task status polling + stats
+- [x] Deduplication via `UniqueConstraint(source, external_id)` + upsert in `_upsert_jobs`; re-embeds on description change
+- [x] Scheduled cron: `scrape_all_sources` runs every 24h via Celery Beat
+
+## Phase 3 Implementation Plan (Complete)
+
+**Goal:** Generate embeddings for jobs and profiles; compute match scores.
+
+Tasks:
+- [x] Fixed `matching.py` — replaced broken `str(embedding)` SQL binding with pgvector ORM
+      `cosine_distance()` operator; uses `pg_insert(...).on_conflict_do_update` for atomic upsert
+- [x] Profile PATCH triggers `embed_profile` task when `desired_titles`, `skills`, or `resume_text` changes
+- [x] `embed_all_jobs(batch_size)` + `embed_all_profiles()` batch tasks
+- [x] `compute_all_user_matches()` task — fans out per-user `compute_user_matches` for all profiles with embeddings
+- [x] Admin endpoints: `POST /admin/embed/jobs/backfill`, `POST /admin/embed/profiles/backfill`, `POST /admin/matches/recompute`
+- [x] `GET /jobs/matches?min_score=0.6` — score filter added
+- [x] `GET /jobs/matches/status` — tells frontend whether embedding is ready
+- [x] `GET /jobs/{id}` — single job detail endpoint
+- [x] `description_preview` and `explanation` (stubbed) fields on `JobResponse`
+- [x] Celery Beat schedule: scrape daily → embed backfill 2h later → recompute matches 3h later
+- [x] Frontend: score filter dropdown, expandable description preview, pending-embedding state
+
+## Phase 4 Implementation Plan (Next)
+
+**Goal:** LLM-powered match explanations + re-ranking; search/filter UI.
+
+Tasks:
+- [ ] Add `explanation` generation via Claude Haiku for top-10 matches per user
+      (call `POST /admin/matches/explain` to batch-generate, store in `matches.explanation`)
+- [ ] Implement Claude-based re-ranking: after vector retrieval, pass top-20 to Claude with
+      user profile to get a ranked + explained list
+- [ ] `GET /jobs/matches?title=&company=&remote=` — keyword search within matches
+- [ ] `GET /jobs/search?q=` — full-text search across all jobs (PostgreSQL `tsvector`)
+- [ ] Job detail page (`/jobs/[id]`) with full description + apply CTA
+- [ ] Skills gap analysis: given a job, show which required skills the user has/lacks
 
 ---
 
