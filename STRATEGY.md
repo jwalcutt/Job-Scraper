@@ -22,10 +22,10 @@ A web application that:
 | 2 | Job ingestion pipeline (job board APIs + scraping) | ✅ Complete |
 | 3 | Resume/job parsing + embedding generation | ✅ Complete |
 | 4 | Matching engine + ranked results API | ✅ Complete |
-| 5 | Frontend web app | 🔲 Not started |
-| 6 | Scheduler + incremental refresh | 🔲 Not started |
+| 5 | Frontend web app | ✅ Complete |
+| 6 | Quality, coverage & deployment readiness | ✅ Complete |
 | 7 | Company career page crawler | 🔲 Not started |
-| 8 | Notifications, saved jobs, apply tracking | 🔲 Not started |
+| 8 | Advanced personalization & analytics | 🔲 Not started |
 
 ---
 
@@ -380,18 +380,62 @@ Tasks:
 - [x] Frontend search page `/search` with full-text query + remote filter
 - [x] Jobs feed: filter bar (title, company, remote, min score), cards link to detail page
 
-## Phase 5 Implementation Plan (Next)
+## Phase 5 — Frontend Web App ✅ Complete
 
-**Goal:** Frontend polish, application tracker, notifications.
+**Goal:** Full-featured frontend and backend for the complete user journey.
+
+Delivered:
+- [x] Auth pages: register (→ onboarding), login
+- [x] 3-step onboarding wizard: resume upload → roles & skills → location & preferences
+- [x] Jobs feed with filter bar (title, company, remote, min score) and "Load more" pagination
+- [x] Job detail page: score badge, LLM explanation, on-demand skills gap panel
+- [x] Full-text search page (`/search`)
+- [x] Saved jobs page (`/saved`)
+- [x] Application tracker (`/applications`): status pipeline, notes editor, summary bar
+- [x] Settings page (`/settings`): change password, email notification prefs, delete account
+- [x] Backend: `/applications`, `/users`, notification tasks, `send_all_digests` Celery Beat schedule
+- [x] Alembic migration 003: notification columns + application status index
+
+---
+
+## Phase 6 — Quality, Coverage & Deployment Readiness ✅ Complete
+
+**Goal:** Ship production-grade hardening: tests, rate limiting, prod Docker, Nginx TLS, CI.
+
+Delivered:
+- [x] Backend test suite: 37 tests across auth, profile, jobs, applications (`pytest` + `httpx.AsyncClient`)
+  - Isolated per-test DB state via function-scoped engine fixtures
+  - Rate-limiter storage reset between tests; Celery tasks mocked
+  - Fixed `bcrypt==4.2.1` pin (bcrypt 5.x broke passlib 1.7.4 compat)
+- [x] Rate limiting via `slowapi`: 5/min on `/auth/register`, 10/min on `/auth/login`
+- [x] `app/limiter.py` singleton — avoids circular import between `main.py` and `auth.py`
+- [x] `app_env` config field (`development` | `production`): tightens CORS, hides `/docs` in prod
+- [x] `backend/scripts/start.sh`: runs `alembic upgrade head` then starts uvicorn (or gunicorn in prod)
+- [x] `backend/Dockerfile`: now sets `CMD ["/app/scripts/start.sh"]`
+- [x] `frontend/Dockerfile`: multi-stage build (node:20-alpine builder → runner)
+- [x] `nginx/nginx.conf`: Nginx reverse proxy with TLS, HTTP→HTTPS redirect, security headers, Certbot integration
+- [x] `docker-compose.prod.yml`: 7 services (postgres, redis, api, worker, beat, frontend, nginx + certbot); gunicorn 4 workers; separate beat scheduler
+- [x] `.github/workflows/ci.yml`: lint (ruff) → test (postgres+redis services) → build+push Docker to GHCR on main
+- [x] `backend/requirements-dev.txt`: pytest + pytest-asyncio + httpx + ruff
+- [x] `backend/pyproject.toml`: pytest config (`asyncio_mode = "auto"`)
+
+---
+
+## Phase 7 Implementation Plan (Next)
+
+**Goal:** Company career page crawler for direct sourcing from 1000+ company sites.
 
 Tasks:
-- [ ] Application tracker: `POST /jobs/{id}/apply` stores application; `GET /applications` lists them
-      with status (applied → phone screen → offer → rejected)
-- [ ] Status update UI on saved page: move application through stages with a dropdown
-- [ ] Email/webhook notification when new high-score matches arrive (score ≥ 0.8)
-- [ ] Pagination on jobs feed (infinite scroll or "Load more")
-- [ ] Onboarding flow: new users see a guided wizard (upload resume → set preferences → first matches)
-- [ ] Settings page: change email/password, delete account, clear matches
+- [ ] Build a company registry: CSV/DB table of `(company_name, careers_url, ats_type)` with 500+ seed entries
+- [ ] ATS type detector: inspect HTML for Workday/iCIMS/Greenhouse/Lever/Taleo fingerprints
+- [ ] Playwright scraper for **Workday** (`myworkdayjobs.com` domains): navigate to `/en-US/External`, extract job cards
+- [ ] Playwright scraper for **iCIMS** (career portals ending in `.icims.com`): list page + job detail extraction
+- [ ] Generic fallback scraper: XPath/CSS heuristics for custom career pages
+- [ ] Deduplication against existing Greenhouse/Lever jobs (match on `company` + `title` + ~`posted_at`)
+- [ ] Rate limiting: ≥5s between requests per domain, 30s timeout, exponential backoff on 429/503
+- [ ] New Celery task `scrape_company_careers(company_id)` + `scrape_all_company_careers()` fan-out
+- [ ] Admin endpoint `POST /admin/scrape/companies` to trigger manually
+- [ ] `robots.txt` checker utility before scraping any URL
 
 ---
 

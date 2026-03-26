@@ -45,11 +45,16 @@ function ScoreBadge({ score }: { score: number }) {
   return <span className={`shrink-0 text-xs font-semibold px-2 py-0.5 rounded-full ${cls}`}>{pct}%</span>;
 }
 
+const PAGE_SIZE = 20;
+
 export default function JobsPage() {
   const router = useRouter();
   const [jobs, setJobs] = useState<Job[]>([]);
   const [status, setStatus] = useState<MatchStatus | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
+  const [offset, setOffset] = useState(0);
   const [saved, setSaved] = useState<Set<number>>(new Set());
 
   // Filters
@@ -58,27 +63,38 @@ export default function JobsPage() {
   const [companyFilter, setCompanyFilter] = useState("");
   const [remoteFilter, setRemoteFilter] = useState<"" | "true" | "false">("");
 
-  const fetchMatches = useCallback(async (opts: {
-    minScore?: number; title?: string; company?: string; remote?: string;
-  }) => {
-    const params = new URLSearchParams({ limit: "100" });
+  function buildParams(opts: {
+    minScore?: number; title?: string; company?: string; remote?: string; offset?: number;
+  }) {
+    const params = new URLSearchParams({ limit: String(PAGE_SIZE) });
     if (opts.minScore) params.set("min_score", String(opts.minScore));
     if (opts.title) params.set("title", opts.title);
     if (opts.company) params.set("company", opts.company);
     if (opts.remote) params.set("remote", opts.remote);
-    const data = await api.get<Job[]>(`/jobs/matches?${params}`);
+    if (opts.offset) params.set("offset", String(opts.offset));
+    return params;
+  }
+
+  const fetchMatches = useCallback(async (opts: {
+    minScore?: number; title?: string; company?: string; remote?: string;
+  }) => {
+    const data = await api.get<Job[]>(`/jobs/matches?${buildParams(opts)}`);
     setJobs(data);
+    setOffset(data.length);
+    setHasMore(data.length === PAGE_SIZE);
   }, []);
 
   useEffect(() => {
     Promise.all([
       api.get<MatchStatus>("/jobs/matches/status"),
-      api.get<Job[]>("/jobs/matches?limit=100"),
+      api.get<Job[]>(`/jobs/matches?${buildParams({})}`),
       api.get<Job[]>("/jobs/saved"),
     ])
       .then(([st, matches, savedJobs]) => {
         setStatus(st);
         setJobs(matches);
+        setOffset(matches.length);
+        setHasMore(matches.length === PAGE_SIZE);
         setSaved(new Set(savedJobs.map((j) => j.id)));
         setLoading(false);
       })
@@ -94,6 +110,20 @@ export default function JobsPage() {
   async function clearFilters() {
     setMinScore(0); setTitleFilter(""); setCompanyFilter(""); setRemoteFilter("");
     await fetchMatches({});
+  }
+
+  async function loadMore() {
+    setLoadingMore(true);
+    try {
+      const data = await api.get<Job[]>(`/jobs/matches?${buildParams({
+        minScore, title: titleFilter, company: companyFilter, remote: remoteFilter, offset,
+      })}`);
+      setJobs((prev) => [...prev, ...data]);
+      setOffset((prev) => prev + data.length);
+      setHasMore(data.length === PAGE_SIZE);
+    } finally {
+      setLoadingMore(false);
+    }
   }
 
   async function toggleSave(jobId: number, e: React.MouseEvent) {
@@ -276,6 +306,18 @@ export default function JobsPage() {
             </button>
           )}
         </p>
+      )}
+
+      {hasMore && (
+        <div className="flex justify-center mt-6">
+          <button
+            onClick={loadMore}
+            disabled={loadingMore}
+            className="rounded-lg border border-gray-300 px-6 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-40 transition-colors"
+          >
+            {loadingMore ? "Loading…" : "Load more"}
+          </button>
+        </div>
       )}
     </div>
   );

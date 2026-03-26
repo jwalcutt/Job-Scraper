@@ -10,6 +10,7 @@ celery_app = Celery(
         "app.tasks.embed_tasks",
         "app.tasks.scrape_tasks",
         "app.tasks.llm_tasks",
+        "app.tasks.notification_tasks",
     ],
 )
 
@@ -38,6 +39,12 @@ celery_app.conf.update(
             "task": "app.tasks.embed_tasks.compute_all_user_matches",
             "schedule": 86400.0,
             "options": {"countdown": 10800},  # 3h after scrape
+        },
+        # 4. Send email digests after matches are fresh (4h after scrape)
+        "send-digests-daily": {
+            "task": "app.tasks.notification_tasks.send_all_digests",
+            "schedule": 86400.0,
+            "options": {"countdown": 14400},
         },
     },
 )

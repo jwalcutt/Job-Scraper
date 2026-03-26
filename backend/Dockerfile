@@ -18,4 +18,7 @@ RUN playwright install chromium --with-deps
 
 COPY . .
 
+RUN chmod +x /app/scripts/start.sh
+
 EXPOSE 8000
+CMD ["/app/scripts/start.sh"]

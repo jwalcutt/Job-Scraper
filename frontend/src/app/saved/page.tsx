@@ -37,7 +37,10 @@ export default function SavedPage() {
     <div className="mx-auto max-w-3xl px-4 py-10">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold text-gray-900">Saved jobs</h1>
-        <Link href="/jobs" className="text-sm text-brand-600 hover:underline">Back to matches</Link>
+        <div className="flex gap-4 text-sm">
+          <Link href="/jobs" className="text-brand-600 hover:underline">Matches</Link>
+          <Link href="/applications" className="text-gray-500 hover:text-gray-700">Applications</Link>
+        </div>
       </div>
 
       {loading && <p className="text-gray-500 text-sm">Loading...</p>}

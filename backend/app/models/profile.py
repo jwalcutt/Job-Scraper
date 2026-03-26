@@ -40,6 +40,12 @@ class Profile(Base):
         Vector(settings.embedding_dim), nullable=True
     )
 
+    # Notification preferences
+    notifications_enabled: Mapped[bool] = mapped_column(default=False)
+    notification_email: Mapped[Optional[str]] = mapped_column(String(255))
+    notification_min_score: Mapped[float] = mapped_column(default=0.8)
+    last_notified_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
