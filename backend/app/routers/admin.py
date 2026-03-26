@@ -30,6 +30,10 @@ class LeverRequest(BaseModel):
     companies: Optional[list[str]] = None
 
 
+class CompanyScrapeRequest(BaseModel):
+    company_ids: Optional[list[int]] = None  # None = all active companies
+
+
 @router.post("/scrape/all", dependencies=[Depends(require_admin)])
 def trigger_scrape_all():
     """Trigger all scraper tasks (Greenhouse + Lever + JobSpy from profiles)."""
@@ -66,6 +70,37 @@ def trigger_scrape_jobspy(body: JobSpyRequest = JobSpyRequest()):
         results_wanted=body.results_wanted,
     )
     return {"task_id": result.id, "status": "queued", "search_term": body.search_term}
+
+
+@router.post("/scrape/companies", dependencies=[Depends(require_admin)])
+def trigger_scrape_companies(body: CompanyScrapeRequest = CompanyScrapeRequest()):
+    """
+    Fan-out Playwright career-page scrapes for registered companies.
+    Pass company_ids to scrape specific companies; omit to scrape all active ones.
+    """
+    from app.tasks.scrape_tasks import scrape_all_company_careers, scrape_company_careers
+    if body.company_ids:
+        for cid in body.company_ids:
+            scrape_company_careers.delay(cid)
+        return {"status": "queued", "companies": len(body.company_ids)}
+    result = scrape_all_company_careers.delay()
+    return {"task_id": result.id, "status": "queued", "description": "all active companies"}
+
+
+@router.post("/scrape/companies/seed", dependencies=[Depends(require_admin)])
+def trigger_seed_company_registry():
+    """Populate the companies table from the built-in seed list."""
+    from app.tasks.scrape_tasks import seed_company_registry
+    result = seed_company_registry.delay()
+    return {"task_id": result.id, "status": "queued", "description": "seed company registry"}
+
+
+@router.post("/scrape/companies/{company_id}", dependencies=[Depends(require_admin)])
+def trigger_scrape_one_company(company_id: int):
+    """Scrape a single company's career page immediately."""
+    from app.tasks.scrape_tasks import scrape_company_careers
+    result = scrape_company_careers.delay(company_id)
+    return {"task_id": result.id, "status": "queued", "company_id": company_id}
 
 
 @router.post("/scrape/jobspy/profiles", dependencies=[Depends(require_admin)])

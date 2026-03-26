@@ -139,6 +139,109 @@ def scrape_jobspy_all_profiles():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Company career page scraper tasks (Phase 7)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_MIN_DOMAIN_DELAY = 5.0  # seconds between requests to the same domain
+
+
+@celery_app.task(
+    name="app.tasks.scrape_tasks.scrape_company_careers",
+    bind=True,
+    max_retries=3,
+    default_retry_delay=60,
+)
+def scrape_company_careers(self, company_id: int):
+    """
+    Scrape a single company's career page and upsert jobs.
+    Respects robots.txt and records last_scraped_at on success.
+    """
+    from datetime import datetime, timezone
+
+    from app.database import AsyncSessionLocal
+    from app.models.company import Company
+    from sqlalchemy import select
+
+    async def _inner():
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(select(Company).where(Company.id == company_id))
+            company = result.scalar_one_or_none()
+            if not company or not company.is_active:
+                return f"Company {company_id} not found or inactive"
+
+            from app.services.scraping.playwright_scraper import scrape_career_page
+            jobs = await scrape_career_page(
+                careers_url=company.careers_url,
+                company_name=company.name,
+                ats_type=company.ats_type,
+            )
+
+            company.last_scraped_at = datetime.now(timezone.utc)
+            await db.commit()
+
+            return jobs
+
+    try:
+        jobs = _run(_inner())
+        if isinstance(jobs, str):
+            return jobs  # informational message (inactive etc.)
+
+        # Apply inter-domain delay (crude but sufficient for Celery task queue)
+        import time
+        time.sleep(_MIN_DOMAIN_DELAY)
+
+        new, updated = _upsert_jobs(jobs)
+        msg = f"Company {company_id}: {len(jobs)} fetched, {new} new, {updated} updated"
+        logger.info(msg)
+        return msg
+    except Exception as exc:
+        logger.warning("Company %d scrape failed: %s — retrying", company_id, exc)
+        raise self.retry(exc=exc, countdown=2 ** self.request.retries * 30)
+
+
+@celery_app.task(name="app.tasks.scrape_tasks.scrape_all_company_careers")
+def scrape_all_company_careers():
+    """
+    Fan-out: queue one scrape_company_careers task per active company.
+    Called by Celery Beat alongside other scrapers.
+    """
+    from app.database import AsyncSessionLocal
+    from app.models.company import Company
+    from sqlalchemy import select
+
+    async def _get_company_ids() -> list[int]:
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(
+                select(Company.id).where(Company.is_active.is_(True))
+            )
+            return [row[0] for row in result.all()]
+
+    company_ids = _run(_get_company_ids())
+    for cid in company_ids:
+        scrape_company_careers.delay(cid)
+
+    msg = f"Queued career-page scrapes for {len(company_ids)} companies"
+    logger.info(msg)
+    return msg
+
+
+@celery_app.task(name="app.tasks.scrape_tasks.seed_company_registry")
+def seed_company_registry():
+    """One-shot task: populate the companies table from the built-in seed list."""
+    from app.database import AsyncSessionLocal
+    from app.services.scraping.company_registry import seed_companies
+
+    async def _inner() -> int:
+        async with AsyncSessionLocal() as db:
+            return await seed_companies(db)
+
+    n = _run(_inner())
+    msg = f"Seeded {n} new companies into registry"
+    logger.info(msg)
+    return msg
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Master orchestrator (called by Celery Beat)
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -148,4 +251,5 @@ def scrape_all_sources():
     scrape_greenhouse.delay()
     scrape_lever.delay()
     scrape_jobspy_all_profiles.delay()
+    scrape_all_company_careers.delay()
     return "All scrape tasks queued"
