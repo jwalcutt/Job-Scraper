@@ -9,6 +9,7 @@ celery_app = Celery(
     include=[
         "app.tasks.embed_tasks",
         "app.tasks.scrape_tasks",
+        "app.tasks.llm_tasks",
     ],
 )
 

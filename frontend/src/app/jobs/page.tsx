@@ -24,37 +24,25 @@ interface Job {
 interface MatchStatus {
   has_embedding: boolean;
   match_count: number;
+  explained_count: number;
   profile_complete: boolean;
 }
 
 function formatSalary(min: number | null, max: number | null): string {
   if (!min && !max) return "";
   const fmt = (n: number) => `$${(n / 1000).toFixed(0)}k`;
-  if (min && max) return `${fmt(min)} – ${fmt(max)}`;
+  if (min && max) return `${fmt(min)}–${fmt(max)}`;
   if (min) return `${fmt(min)}+`;
   return `up to ${fmt(max!)}`;
 }
 
 function ScoreBadge({ score }: { score: number }) {
   const pct = Math.round(score * 100);
-  const color =
-    pct >= 80
-      ? "bg-green-100 text-green-700"
-      : pct >= 60
-      ? "bg-yellow-100 text-yellow-700"
-      : "bg-gray-100 text-gray-500";
-  return (
-    <span className={`shrink-0 text-xs font-semibold px-2 py-0.5 rounded-full ${color}`}>
-      {pct}%
-    </span>
-  );
-}
-
-function SourceBadge({ source }: { source: string }) {
-  const label = source.replace("jobspy_", "").replace("_", " ");
-  return (
-    <span className="text-xs text-gray-400 capitalize">{label}</span>
-  );
+  const cls =
+    pct >= 80 ? "bg-green-100 text-green-700" :
+    pct >= 60 ? "bg-yellow-100 text-yellow-700" :
+    "bg-gray-100 text-gray-500";
+  return <span className={`shrink-0 text-xs font-semibold px-2 py-0.5 rounded-full ${cls}`}>{pct}%</span>;
 }
 
 export default function JobsPage() {
@@ -63,11 +51,22 @@ export default function JobsPage() {
   const [status, setStatus] = useState<MatchStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [saved, setSaved] = useState<Set<number>>(new Set());
-  const [minScore, setMinScore] = useState(0);
-  const [expanded, setExpanded] = useState<number | null>(null);
 
-  const fetchMatches = useCallback(async (score: number) => {
-    const data = await api.get<Job[]>(`/jobs/matches?min_score=${score}&limit=100`);
+  // Filters
+  const [minScore, setMinScore] = useState(0);
+  const [titleFilter, setTitleFilter] = useState("");
+  const [companyFilter, setCompanyFilter] = useState("");
+  const [remoteFilter, setRemoteFilter] = useState<"" | "true" | "false">("");
+
+  const fetchMatches = useCallback(async (opts: {
+    minScore?: number; title?: string; company?: string; remote?: string;
+  }) => {
+    const params = new URLSearchParams({ limit: "100" });
+    if (opts.minScore) params.set("min_score", String(opts.minScore));
+    if (opts.title) params.set("title", opts.title);
+    if (opts.company) params.set("company", opts.company);
+    if (opts.remote) params.set("remote", opts.remote);
+    const data = await api.get<Job[]>(`/jobs/matches?${params}`);
     setJobs(data);
   }, []);
 
@@ -86,8 +85,19 @@ export default function JobsPage() {
       .catch(() => router.push("/login"));
   }, [router]);
 
+  async function applyFilters() {
+    await fetchMatches({
+      minScore, title: titleFilter, company: companyFilter, remote: remoteFilter,
+    });
+  }
+
+  async function clearFilters() {
+    setMinScore(0); setTitleFilter(""); setCompanyFilter(""); setRemoteFilter("");
+    await fetchMatches({});
+  }
+
   async function toggleSave(jobId: number, e: React.MouseEvent) {
-    e.stopPropagation();
+    e.preventDefault();
     if (saved.has(jobId)) {
       await api.delete(`/jobs/${jobId}/save`);
       setSaved((s) => { const n = new Set(s); n.delete(jobId); return n; });
@@ -97,55 +107,80 @@ export default function JobsPage() {
     }
   }
 
-  async function handleScoreChange(val: number) {
-    setMinScore(val);
-    await fetchMatches(val);
-  }
+  const hasFilters = minScore > 0 || titleFilter || companyFilter || remoteFilter;
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-10">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-5">
         <h1 className="text-2xl font-bold text-gray-900">Your matches</h1>
-        <div className="flex gap-4 items-center">
-          <Link href="/saved" className="text-sm text-brand-600 hover:underline">Saved</Link>
-          <Link href="/profile" className="text-sm text-gray-500 hover:underline">Edit profile</Link>
+        <div className="flex gap-4 text-sm">
+          <Link href="/search" className="text-gray-500 hover:text-gray-700">Search all jobs</Link>
+          <Link href="/saved" className="text-brand-600 hover:underline">Saved</Link>
+          <Link href="/profile" className="text-gray-500 hover:text-gray-700">Profile</Link>
         </div>
       </div>
 
-      {/* Empty / pending states */}
-      {loading && (
-        <div className="text-center py-16 text-gray-400">Loading matches…</div>
-      )}
-
+      {/* Status banners */}
       {!loading && status && !status.profile_complete && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 p-5 mb-6">
-          <p className="text-sm text-amber-800 font-medium">Profile incomplete</p>
-          <p className="text-sm text-amber-700 mt-1">
-            Add desired titles, skills, or upload a resume so we can find matches.{" "}
-            <Link href="/profile" className="underline">Complete your profile</Link>
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 mb-5">
+          <p className="text-sm text-amber-800">
+            <span className="font-medium">Profile incomplete.</span>{" "}
+            Add desired titles, skills, or upload a resume.{" "}
+            <Link href="/profile" className="underline">Complete profile →</Link>
           </p>
         </div>
       )}
-
       {!loading && status?.profile_complete && !status.has_embedding && (
-        <div className="rounded-lg border border-blue-200 bg-blue-50 p-5 mb-6">
-          <p className="text-sm text-blue-800 font-medium">Computing your matches…</p>
-          <p className="text-sm text-blue-700 mt-1">
-            Your profile embedding is being generated in the background. Refresh in a moment.
+        <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 mb-5">
+          <p className="text-sm text-blue-800">
+            <span className="font-medium">Computing matches…</span>{" "}
+            Your profile is being embedded in the background. Refresh in a moment.
           </p>
         </div>
       )}
 
-      {/* Filters */}
-      {!loading && jobs.length > 0 && (
-        <div className="flex items-center gap-4 mb-4">
-          <label className="text-sm text-gray-600">
-            Min score:
+      {/* Filter bar */}
+      {!loading && (
+        <div className="rounded-lg border border-gray-200 bg-white p-3 mb-5 flex flex-wrap gap-2 items-end">
+          <div className="flex-1 min-w-32">
+            <label className="block text-xs text-gray-500 mb-1">Title</label>
+            <input
+              type="text"
+              placeholder="engineer, analyst…"
+              value={titleFilter}
+              onChange={(e) => setTitleFilter(e.target.value)}
+              className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-brand-500"
+            />
+          </div>
+          <div className="flex-1 min-w-28">
+            <label className="block text-xs text-gray-500 mb-1">Company</label>
+            <input
+              type="text"
+              placeholder="stripe, notion…"
+              value={companyFilter}
+              onChange={(e) => setCompanyFilter(e.target.value)}
+              className="w-full rounded border border-gray-300 px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-brand-500"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Location</label>
+            <select
+              value={remoteFilter}
+              onChange={(e) => setRemoteFilter(e.target.value as "" | "true" | "false")}
+              className="rounded border border-gray-300 px-2 py-1.5 text-xs"
+            >
+              <option value="">Any</option>
+              <option value="true">Remote</option>
+              <option value="false">Onsite</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Min score</label>
             <select
               value={minScore}
-              onChange={(e) => handleScoreChange(Number(e.target.value))}
-              className="ml-2 rounded border border-gray-300 text-sm px-2 py-1"
+              onChange={(e) => setMinScore(Number(e.target.value))}
+              className="rounded border border-gray-300 px-2 py-1.5 text-xs"
             >
               <option value={0}>All</option>
               <option value={0.5}>50%+</option>
@@ -153,26 +188,45 @@ export default function JobsPage() {
               <option value={0.7}>70%+</option>
               <option value={0.8}>80%+</option>
             </select>
-          </label>
-          <span className="text-sm text-gray-400">{jobs.length} results</span>
+          </div>
+          <div className="flex gap-1">
+            <button
+              onClick={applyFilters}
+              className="rounded bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700 transition-colors"
+            >
+              Filter
+            </button>
+            {hasFilters && (
+              <button
+                onClick={clearFilters}
+                className="rounded border border-gray-300 px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-50 transition-colors"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+          <span className="ml-auto text-xs text-gray-400 self-center">{jobs.length} results</span>
         </div>
       )}
 
-      {/* Job list */}
+      {loading && <div className="text-center py-16 text-gray-400 text-sm">Loading matches…</div>}
+
+      {/* Job cards */}
       <div className="space-y-2">
         {jobs.map((job) => (
-          <div
+          <Link
             key={job.id}
-            className="rounded-lg border border-gray-200 bg-white overflow-hidden hover:border-gray-300 transition-colors cursor-pointer"
-            onClick={() => setExpanded(expanded === job.id ? null : job.id)}
+            href={`/jobs/${job.id}`}
+            className="block rounded-lg border border-gray-200 bg-white hover:border-gray-300 hover:shadow-sm transition-all overflow-hidden"
           >
-            {/* Summary row */}
             <div className="flex items-start gap-3 p-4">
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <span className="font-semibold text-gray-900 text-sm">{job.title}</span>
+                  <span className="font-semibold text-sm text-gray-900">{job.title}</span>
                   {job.score !== null && <ScoreBadge score={job.score} />}
-                  <SourceBadge source={job.source} />
+                  <span className="text-xs text-gray-400 capitalize">
+                    {job.source.replace("jobspy_", "").replace("_", " ")}
+                  </span>
                 </div>
                 <p className="text-sm text-gray-600 mt-0.5">
                   {job.company}
@@ -183,7 +237,7 @@ export default function JobsPage() {
                   <p className="text-xs text-gray-400 mt-0.5">{formatSalary(job.salary_min, job.salary_max)}</p>
                 )}
                 {job.explanation && (
-                  <p className="text-xs text-blue-600 mt-1 italic">{job.explanation}</p>
+                  <p className="text-xs text-blue-600 mt-1 italic line-clamp-1">{job.explanation}</p>
                 )}
               </div>
               <div className="flex items-center gap-2 shrink-0 pt-0.5">
@@ -209,39 +263,19 @@ export default function JobsPage() {
                 )}
               </div>
             </div>
-
-            {/* Expandable description preview */}
-            {expanded === job.id && job.description_preview && (
-              <div className="border-t border-gray-100 px-4 py-3 bg-gray-50">
-                <p className="text-sm text-gray-600 leading-relaxed">{job.description_preview}</p>
-                {job.url && (
-                  <a
-                    href={job.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-block mt-2 text-xs text-brand-600 hover:underline"
-                  >
-                    View full posting →
-                  </a>
-                )}
-              </div>
-            )}
-          </div>
+          </Link>
         ))}
       </div>
 
       {!loading && status?.has_embedding && jobs.length === 0 && (
-        <div className="text-center py-16 text-gray-400 text-sm">
-          No matches found{minScore > 0 ? ` above ${Math.round(minScore * 100)}%` : ""}.
-          {minScore > 0 && (
-            <button
-              onClick={() => handleScoreChange(0)}
-              className="ml-1 text-brand-600 hover:underline"
-            >
-              Show all
+        <p className="text-center text-gray-400 text-sm py-12">
+          No matches{hasFilters ? " for these filters" : ""}.
+          {hasFilters && (
+            <button onClick={clearFilters} className="ml-1 text-brand-600 hover:underline">
+              Clear filters
             </button>
           )}
-        </div>
+        </p>
       )}
     </div>
   );

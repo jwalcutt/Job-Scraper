@@ -29,5 +29,9 @@ Thumbs.db
 .vscode/
 .idea/
 
+# Agents
 .claude
 .STRATEGY.md
+.agents
+.windsurf
+skills-lock.json

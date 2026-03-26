@@ -21,7 +21,7 @@ A web application that:
 | 1 | Core user profile + DB schema + API skeleton | ✅ Complete |
 | 2 | Job ingestion pipeline (job board APIs + scraping) | ✅ Complete |
 | 3 | Resume/job parsing + embedding generation | ✅ Complete |
-| 4 | Matching engine + ranked results API | 🔲 Not started |
+| 4 | Matching engine + ranked results API | ✅ Complete |
 | 5 | Frontend web app | 🔲 Not started |
 | 6 | Scheduler + incremental refresh | 🔲 Not started |
 | 7 | Company career page crawler | 🔲 Not started |
@@ -360,19 +360,38 @@ Tasks:
 - [x] Celery Beat schedule: scrape daily → embed backfill 2h later → recompute matches 3h later
 - [x] Frontend: score filter dropdown, expandable description preview, pending-embedding state
 
-## Phase 4 Implementation Plan (Next)
+## Phase 4 Implementation Plan (Complete)
 
 **Goal:** LLM-powered match explanations + re-ranking; search/filter UI.
 
 Tasks:
-- [ ] Add `explanation` generation via Claude Haiku for top-10 matches per user
-      (call `POST /admin/matches/explain` to batch-generate, store in `matches.explanation`)
-- [ ] Implement Claude-based re-ranking: after vector retrieval, pass top-20 to Claude with
-      user profile to get a ranked + explained list
-- [ ] `GET /jobs/matches?title=&company=&remote=` — keyword search within matches
-- [ ] `GET /jobs/search?q=` — full-text search across all jobs (PostgreSQL `tsvector`)
-- [ ] Job detail page (`/jobs/[id]`) with full description + apply CTA
-- [ ] Skills gap analysis: given a job, show which required skills the user has/lacks
+- [x] `app/services/llm.py` — Claude Haiku wrappers: `match_explanation`, `rerank_and_explain`, `skills_gap`
+      Gracefully no-ops when ANTHROPIC_API_KEY is absent
+- [x] `app/tasks/llm_tasks.py` — `explain_matches_for_user`, `rerank_matches_for_user`,
+      `explain_all_users`, `rerank_all_users` Celery tasks
+- [x] Admin endpoints: `POST /admin/matches/explain[/{user_id}]`,
+      `POST /admin/matches/rerank[/{user_id}]`
+- [x] `GET /jobs/matches?title=&company=&remote=&source=&min_score=` — full filter support
+- [x] `GET /jobs/search?q=&remote=` — PostgreSQL tsvector full-text search with functional GIN index
+      (migration 002); attaches user's match score to search results
+- [x] `GET /jobs/{id}/skills-gap` — per-job skills analysis via Claude
+- [x] Frontend job detail page `/jobs/[id]` — score badge, LLM explanation, skills gap panel,
+      full description preview, apply CTA
+- [x] Frontend search page `/search` with full-text query + remote filter
+- [x] Jobs feed: filter bar (title, company, remote, min score), cards link to detail page
+
+## Phase 5 Implementation Plan (Next)
+
+**Goal:** Frontend polish, application tracker, notifications.
+
+Tasks:
+- [ ] Application tracker: `POST /jobs/{id}/apply` stores application; `GET /applications` lists them
+      with status (applied → phone screen → offer → rejected)
+- [ ] Status update UI on saved page: move application through stages with a dropdown
+- [ ] Email/webhook notification when new high-score matches arrive (score ≥ 0.8)
+- [ ] Pagination on jobs feed (infinite scroll or "Load more")
+- [ ] Onboarding flow: new users see a guided wizard (upload resume → set preferences → first matches)
+- [ ] Settings page: change email/password, delete account, clear matches
 
 ---
 

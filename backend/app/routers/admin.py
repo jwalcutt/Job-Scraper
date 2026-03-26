@@ -152,3 +152,56 @@ def trigger_recompute_all_matches():
     from app.tasks.embed_tasks import compute_all_user_matches
     result = compute_all_user_matches.delay()
     return {"task_id": result.id, "status": "queued"}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# LLM endpoints
+# ─────────────────────────────────────────────────────────────────────────────
+
+class ExplainRequest(BaseModel):
+    top_k: int = 10
+    force: bool = False  # overwrite existing explanations
+
+
+class ReRankRequest(BaseModel):
+    top_k: int = 20
+
+
+@router.post("/matches/explain", dependencies=[Depends(require_admin)])
+def trigger_explain_all(body: ExplainRequest = ExplainRequest()):
+    """
+    Generate Claude Haiku explanations for every user's top-k matches.
+    Skips matches that already have explanations unless force=True.
+    Requires ANTHROPIC_API_KEY.
+    """
+    from app.tasks.llm_tasks import explain_all_users
+    result = explain_all_users.delay(top_k=body.top_k, force=body.force)
+    return {"task_id": result.id, "status": "queued", "top_k": body.top_k, "force": body.force}
+
+
+@router.post("/matches/explain/{user_id}", dependencies=[Depends(require_admin)])
+def trigger_explain_user(user_id: int, body: ExplainRequest = ExplainRequest()):
+    """Generate explanations for a single user's top-k matches."""
+    from app.tasks.llm_tasks import explain_matches_for_user
+    result = explain_matches_for_user.delay(user_id, top_k=body.top_k, force=body.force)
+    return {"task_id": result.id, "status": "queued", "user_id": user_id}
+
+
+@router.post("/matches/rerank", dependencies=[Depends(require_admin)])
+def trigger_rerank_all(body: ReRankRequest = ReRankRequest()):
+    """
+    Re-rank + explain every user's top-k matches via Claude.
+    Updates match scores with a blend of vector + LLM rank.
+    Requires ANTHROPIC_API_KEY.
+    """
+    from app.tasks.llm_tasks import rerank_all_users
+    result = rerank_all_users.delay(top_k=body.top_k)
+    return {"task_id": result.id, "status": "queued", "top_k": body.top_k}
+
+
+@router.post("/matches/rerank/{user_id}", dependencies=[Depends(require_admin)])
+def trigger_rerank_user(user_id: int, body: ReRankRequest = ReRankRequest()):
+    """Re-rank a single user's top-k matches."""
+    from app.tasks.llm_tasks import rerank_matches_for_user
+    result = rerank_matches_for_user.delay(user_id, top_k=body.top_k)
+    return {"task_id": result.id, "status": "queued", "user_id": user_id}

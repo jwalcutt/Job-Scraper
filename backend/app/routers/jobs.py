@@ -1,8 +1,9 @@
+import re
 from typing import Optional
 from datetime import datetime
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc
+from sqlalchemy import select, desc, or_, func, text
 from pydantic import BaseModel
 
 from app.database import get_db
@@ -12,6 +13,9 @@ from app.models.match import Match, SavedJob
 from app.services.auth import get_current_user
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
+
+_TAG_RE = re.compile(r"<[^>]+>")
+_WS_RE = re.compile(r"\s+")
 
 
 class JobResponse(BaseModel):
@@ -25,23 +29,31 @@ class JobResponse(BaseModel):
     url: Optional[str]
     source: str
     posted_at: Optional[datetime]
-    # Match-specific fields (null when fetching saved jobs without a match)
     score: Optional[float] = None
     explanation: Optional[str] = None
-    # First 300 chars of description for the feed preview
     description_preview: Optional[str] = None
 
     model_config = {"from_attributes": True}
 
 
-def _build_job_response(job: Job, score: Optional[float] = None, explanation: Optional[str] = None) -> JobResponse:
+class SkillsGapResponse(BaseModel):
+    matching: list[str]
+    missing: list[str]
+
+
+def _strip_html(s: str) -> str:
+    return _WS_RE.sub(" ", _TAG_RE.sub(" ", s)).strip()
+
+
+def _build_job_response(
+    job: Job,
+    score: Optional[float] = None,
+    explanation: Optional[str] = None,
+) -> JobResponse:
     preview = None
     if job.description:
-        # Strip HTML tags crudely; good enough for a short preview
-        import re
-        text = re.sub(r"<[^>]+>", " ", job.description)
-        text = re.sub(r"\s+", " ", text).strip()
-        preview = text[:300] + ("…" if len(text) > 300 else "")
+        text_clean = _strip_html(job.description)
+        preview = text_clean[:300] + ("…" if len(text_clean) > 300 else "")
 
     return JobResponse(
         id=job.id,
@@ -60,24 +72,40 @@ def _build_job_response(job: Job, score: Optional[float] = None, explanation: Op
     )
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Matches
+# ─────────────────────────────────────────────────────────────────────────────
+
 @router.get("/matches", response_model=list[JobResponse])
 async def get_matches(
     limit: int = Query(default=50, le=200),
     offset: int = Query(default=0, ge=0),
-    min_score: float = Query(default=0.0, ge=0.0, le=1.0, description="Minimum match score (0–1)"),
+    min_score: float = Query(default=0.0, ge=0.0, le=1.0),
+    title: Optional[str] = Query(default=None, description="Filter by job title (partial match)"),
+    company: Optional[str] = Query(default=None, description="Filter by company name (partial match)"),
+    remote: Optional[bool] = Query(default=None, description="Filter remote / onsite"),
+    source: Optional[str] = Query(default=None, description="Filter by source (greenhouse, lever, jobspy_indeed, …)"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Return the user's top matched jobs, ordered by descending score."""
+    """Return the user's top matched jobs with optional keyword filters."""
     stmt = (
         select(Job, Match.score, Match.explanation)
         .join(Match, Match.job_id == Job.id)
         .where(Match.user_id == current_user.id)
         .where(Match.score >= min_score)
-        .order_by(desc(Match.score))
-        .limit(limit)
-        .offset(offset)
     )
+
+    if title:
+        stmt = stmt.where(Job.title.ilike(f"%{title}%"))
+    if company:
+        stmt = stmt.where(Job.company.ilike(f"%{company}%"))
+    if remote is not None:
+        stmt = stmt.where(Job.is_remote == remote)
+    if source:
+        stmt = stmt.where(Job.source == source)
+
+    stmt = stmt.order_by(desc(Match.score)).limit(limit).offset(offset)
     rows = (await db.execute(stmt)).all()
     return [_build_job_response(job, score, explanation) for job, score, explanation in rows]
 
@@ -87,8 +115,7 @@ async def get_matches_status(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Return metadata about the user's match state — useful for the frontend to know if matches are ready."""
-    from sqlalchemy import func
+    """Tell the frontend whether the user's embedding + matches are ready."""
     from app.models.profile import Profile
 
     profile_result = await db.execute(select(Profile).where(Profile.user_id == current_user.id))
@@ -98,15 +125,79 @@ async def get_matches_status(
         select(func.count()).select_from(Match).where(Match.user_id == current_user.id)
     )).scalar()
 
+    explained_count = (await db.execute(
+        select(func.count()).select_from(Match)
+        .where(Match.user_id == current_user.id)
+        .where(Match.explanation.is_not(None))
+    )).scalar()
+
     return {
         "has_embedding": profile is not None and profile.resume_embedding is not None,
         "match_count": match_count,
+        "explained_count": explained_count,
         "profile_complete": bool(
-            profile
-            and (profile.resume_text or profile.desired_titles or profile.skills)
+            profile and (profile.resume_text or profile.desired_titles or profile.skills)
         ),
     }
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Full-text search across all jobs
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/search", response_model=list[JobResponse])
+async def search_jobs(
+    q: str = Query(min_length=2, description="Search query"),
+    limit: int = Query(default=50, le=200),
+    offset: int = Query(default=0, ge=0),
+    remote: Optional[bool] = Query(default=None),
+    source: Optional[str] = Query(default=None),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Full-text search across all jobs using PostgreSQL tsvector.
+    Returns jobs ranked by text relevance (ts_rank). Not personalised.
+    """
+    # plainto_tsquery is safer than to_tsquery — handles arbitrary user input
+    fts_expr = text(
+        "to_tsvector('english', coalesce(title,'') || ' ' || coalesce(company,'') || ' ' || coalesce(description,''))"
+    )
+    tsquery = func.plainto_tsquery("english", q)
+
+    stmt = (
+        select(Job, func.ts_rank(fts_expr, tsquery).label("rank"))
+        .where(fts_expr.op("@@")(tsquery))
+    )
+
+    if remote is not None:
+        stmt = stmt.where(Job.is_remote == remote)
+    if source:
+        stmt = stmt.where(Job.source == source)
+
+    stmt = stmt.order_by(desc("rank")).limit(limit).offset(offset)
+    rows = (await db.execute(stmt)).all()
+
+    # Attach the user's match score if one exists
+    job_ids = [job.id for job, _ in rows]
+    match_scores: dict[int, tuple[float, Optional[str]]] = {}
+    if job_ids:
+        match_rows = (await db.execute(
+            select(Match.job_id, Match.score, Match.explanation)
+            .where(Match.user_id == current_user.id)
+            .where(Match.job_id.in_(job_ids))
+        )).all()
+        match_scores = {jid: (score, explanation) for jid, score, explanation in match_rows}
+
+    return [
+        _build_job_response(job, *match_scores.get(job.id, (None, None)))
+        for job, _ in rows
+    ]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Saved jobs
+# ─────────────────────────────────────────────────────────────────────────────
 
 @router.get("/saved", response_model=list[JobResponse])
 async def get_saved_jobs(
@@ -123,15 +214,17 @@ async def get_saved_jobs(
     return [_build_job_response(job) for job in jobs]
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Single job
+# ─────────────────────────────────────────────────────────────────────────────
+
 @router.get("/{job_id}", response_model=JobResponse)
 async def get_job(
     job_id: int,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Fetch a single job with full description (for a detail view)."""
-    from fastapi import HTTPException
-
+    """Single job detail — includes full description_preview (up to 300 chars)."""
     job_result = await db.execute(select(Job).where(Job.id == job_id))
     job = job_result.scalar_one_or_none()
     if not job:
@@ -141,8 +234,43 @@ async def get_job(
         select(Match).where(Match.user_id == current_user.id, Match.job_id == job_id)
     )
     match = match_result.scalar_one_or_none()
-    return _build_job_response(job, match.score if match else None, match.explanation if match else None)
+    return _build_job_response(
+        job,
+        match.score if match else None,
+        match.explanation if match else None,
+    )
 
+
+@router.get("/{job_id}/skills-gap", response_model=SkillsGapResponse)
+async def get_skills_gap(
+    job_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Compare the user's skills to a job's requirements via Claude.
+    Returns matching and missing skills. Requires ANTHROPIC_API_KEY.
+    """
+    from app.models.profile import Profile
+    from app.services.llm import skills_gap
+
+    job_result = await db.execute(select(Job).where(Job.id == job_id))
+    job = job_result.scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    profile_result = await db.execute(select(Profile).where(Profile.user_id == current_user.id))
+    profile = profile_result.scalar_one_or_none()
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found")
+
+    result = skills_gap(profile, job)
+    return SkillsGapResponse(**result)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Save / unsave
+# ─────────────────────────────────────────────────────────────────────────────
 
 @router.post("/{job_id}/save")
 async def save_job(
