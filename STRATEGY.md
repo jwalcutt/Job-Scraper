@@ -1,0 +1,355 @@
+# Job Matcher — Strategy & Architecture Document
+
+> Living document. Update this file as decisions are made, approaches change, or phases complete.
+
+---
+
+## Vision
+
+A web application that:
+1. Lets users build a rich profile (resume, skills, location, desired roles, experience, salary expectations)
+2. Continuously ingests job postings from major job boards + thousands of company career pages
+3. Uses semantic matching (embeddings + NLP) to surface the most relevant opportunities for each user
+4. Presents ranked results with explanations, application links, and match scoring
+
+---
+
+## Phase Roadmap
+
+| Phase | Scope | Status |
+|-------|-------|--------|
+| 1 | Core user profile + DB schema + API skeleton | 🔲 Not started |
+| 2 | Job ingestion pipeline (job board APIs + scraping) | 🔲 Not started |
+| 3 | Resume/job parsing + embedding generation | 🔲 Not started |
+| 4 | Matching engine + ranked results API | 🔲 Not started |
+| 5 | Frontend web app | 🔲 Not started |
+| 6 | Scheduler + incremental refresh | 🔲 Not started |
+| 7 | Company career page crawler | 🔲 Not started |
+| 8 | Notifications, saved jobs, apply tracking | 🔲 Not started |
+
+---
+
+## Tech Stack
+
+### Frontend
+- **Next.js 14** (App Router) — full-stack React framework; handles routing, SSR, and API routes in one repo
+- **Tailwind CSS** — utility-first styling
+- **shadcn/ui** — accessible component primitives
+- **React Hook Form + Zod** — form validation for profile editing
+
+### Backend API
+- **FastAPI (Python)** — async, type-safe, excellent for ML/NLP workloads
+- **SQLAlchemy 2 (async)** — ORM with pgvector support
+- **Pydantic v2** — request/response validation
+- **Alembic** — database migrations
+
+### Database
+- **PostgreSQL 16** with **pgvector** extension
+  - Stores users, profiles, jobs, embeddings, match scores all in one place
+  - pgvector's `vector` column type enables cosine similarity search natively
+  - Avoids the operational overhead of a separate vector DB in early phases
+  - Can migrate to Weaviate/Pinecone if scale demands it
+
+### Job Ingestion
+- **python-jobspy** — battle-tested library that scrapes LinkedIn, Indeed, ZipRecruiter, Glassdoor, Google Jobs concurrently
+- **Greenhouse public API** — `GET /v1/boards/{token}/jobs` returns structured JSON for thousands of tech companies
+- **Lever career pages** — Lever exposes `/v0/postings/{company}` JSON endpoints (unofficial but widely used)
+- **Playwright** — headless browser for company websites that use Workday, iCIMS, or custom career pages
+- **Scrapy** — for large-scale company website crawls (Phase 7)
+
+### NLP / Matching
+- **spaCy** — NER for extracting skills, titles, companies, education from resumes and job descriptions
+- **sentence-transformers** (`all-MiniLM-L6-v2` or `BAAI/bge-base-en-v1.5`) — open-source embeddings; no API cost
+- **pgvector** `<->` operator — cosine distance search over job embeddings
+- **Claude API (claude-haiku-4-5)** — optional LLM layer for match explanation and re-ranking
+
+### Infrastructure
+- **Celery + Redis** — background task queue for scheduled scraping and embedding jobs
+- **Docker Compose** — local dev environment (Postgres, Redis, API, frontend, workers)
+- **GitHub Actions** — CI/CD
+
+---
+
+## System Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        Next.js Frontend                      │
+│  Profile Editor │ Job Feed │ Match Scores │ Apply Tracker   │
+└───────────────────────────┬─────────────────────────────────┘
+                            │ REST / JSON
+┌───────────────────────────▼─────────────────────────────────┐
+│                     FastAPI Backend                          │
+│  /users  /profile  /jobs  /matches  /scrape (trigger)       │
+└──────┬────────────────────────────────────────┬─────────────┘
+       │ SQLAlchemy (async)                      │ Celery tasks
+┌──────▼──────────────────┐          ┌──────────▼─────────────┐
+│  PostgreSQL + pgvector  │          │   Celery Workers        │
+│  - users                │◄─────────│   - scrape_jobspy       │
+│  - profiles             │          │   - scrape_greenhouse   │
+│  - jobs (+ embedding)   │          │   - scrape_lever        │
+│  - matches              │          │   - scrape_playwright   │
+│  - saved_jobs           │          │   - embed_jobs          │
+└─────────────────────────┘          │   - match_user          │
+                                     └────────────┬────────────┘
+                                                  │
+                          ┌───────────────────────▼────────────┐
+                          │       External Sources              │
+                          │  JobSpy (LinkedIn/Indeed/etc.)      │
+                          │  Greenhouse API                     │
+                          │  Lever API                          │
+                          │  Playwright (Workday/iCIMS/custom)  │
+                          └────────────────────────────────────┘
+```
+
+---
+
+## Database Schema (Core Tables)
+
+```sql
+-- Users & authentication
+users (id, email, password_hash, created_at, updated_at)
+
+-- Rich user profile
+profiles (
+  id, user_id,
+  full_name, location, remote_preference,   -- REMOTE | HYBRID | ONSITE | ANY
+  desired_titles TEXT[],                     -- ["Software Engineer", "Backend Developer"]
+  desired_salary_min, desired_salary_max,
+  years_experience,
+  skills TEXT[],                             -- ["Python", "React", "AWS"]
+  resume_text TEXT,                          -- raw text extracted from uploaded resume
+  resume_embedding vector(384),             -- embedding of resume for similarity search
+  updated_at
+)
+
+-- Scraped job postings
+jobs (
+  id, external_id, source,                  -- "greenhouse", "jobspy_indeed", "lever", etc.
+  company, title, location, is_remote,
+  salary_min, salary_max,
+  description TEXT,
+  embedding vector(384),                     -- embedding of job description
+  url,
+  posted_at, scraped_at, expires_at
+)
+
+-- Per-user match scores (computed async)
+matches (
+  id, user_id, job_id,
+  score FLOAT,                               -- cosine similarity 0–1
+  explanation TEXT,                          -- LLM-generated (optional)
+  computed_at
+)
+
+-- User interactions
+saved_jobs (id, user_id, job_id, saved_at)
+applications (id, user_id, job_id, applied_at, status, notes)
+```
+
+---
+
+## Job Ingestion Strategy
+
+### Tier 1 — Official APIs (use first, most reliable)
+
+| Source | Method | Notes |
+|--------|--------|-------|
+| Greenhouse | `GET https://boards-api.greenhouse.io/v1/boards/{token}/jobs` | Public, no auth. Thousands of tech companies. |
+| Lever | `GET https://api.lever.co/v0/postings/{company}?mode=json` | Unofficial but stable. Good JSON structure. |
+| ZipRecruiter | Official API | Requires account; free tier available |
+| CareerBuilder | Official API | Job postings + resume search |
+
+### Tier 2 — python-jobspy (scraping wrapper, respecting rate limits)
+
+Scrapes: LinkedIn, Indeed, Glassdoor, Google Jobs, ZipRecruiter
+Usage: `jobs = scrape_jobs(site_name=["linkedin","indeed","glassdoor"], search_term=..., location=..., results_wanted=50)`
+Rate limiting: 3–5s delay per request, proxy rotation for LinkedIn
+Legal note: Violates ToS of LinkedIn/Glassdoor/Indeed. Acceptable for personal/research use; not for commercial redistribution. See legal section below.
+
+### Tier 3 — Playwright crawls (Phase 7)
+
+Target: Companies using Workday, iCIMS, SAP SuccessFactors, or custom career pages
+Approach:
+1. Maintain a list of target companies + their ATS URL pattern
+2. Playwright navigates to `/careers` or `/jobs`, extracts job listings
+3. Store raw HTML + extracted fields in `jobs` table
+
+### Discovery: Building the Company List
+
+- Curate seed list from Fortune 500, Inc 5000, tech unicorn lists
+- Detect ATS type from HTML (meta tags, script src, iframe src patterns)
+- Greenhouse companies: `https://boards.greenhouse.io/` directory
+- Lever companies: searchable at `https://jobs.lever.co/`
+- Grow list over time via user suggestions + LinkedIn company scrape
+
+---
+
+## Matching Engine
+
+### Step 1 — Embedding Generation
+
+- When a job is ingested: embed `title + company + description` → `jobs.embedding`
+- When a user updates their profile: embed `resume_text + desired_titles + skills` → `profiles.resume_embedding`
+- Model: `sentence-transformers/BAAI/bge-base-en-v1.5` (384-dim, fast, high quality)
+- Run as Celery tasks so they don't block the API
+
+### Step 2 — Candidate Retrieval (Fast)
+
+```sql
+SELECT j.*, 1 - (j.embedding <=> p.resume_embedding) AS score
+FROM jobs j, profiles p
+WHERE p.user_id = $1
+  AND (j.is_remote = true OR j.location ILIKE '%' || p.location || '%')
+  AND j.posted_at > NOW() - INTERVAL '30 days'
+ORDER BY j.embedding <=> p.resume_embedding
+LIMIT 100;
+```
+
+### Step 3 — Re-ranking (Optional, Phase 4+)
+
+After vector retrieval, apply rule-based filters + optional LLM re-ranking:
+- Hard filters: salary range, remote preference, years of experience
+- Soft boost: title keyword overlap, required skills coverage
+- LLM explanation: pass top 10 matches to Claude Haiku with user profile → generate 1-sentence match explanation per job
+
+### Step 4 — Caching Results
+
+- Store computed matches in `matches` table
+- Refresh when: user updates profile OR new jobs arrive for matching titles
+- Avoid re-running for every page load
+
+---
+
+## Resume Parsing
+
+1. User uploads PDF/DOCX → extract text with `pdfminer.six` / `python-docx`
+2. NER pass with spaCy (`en_core_web_sm` + custom pipeline):
+   - Extract: job titles, companies, skills, education, dates
+   - Populate `profiles.skills[]` and `profiles.desired_titles[]` as suggestions
+3. Full text stored in `profiles.resume_text` for embedding
+4. User can review/edit extracted fields before saving
+
+---
+
+## Legal & Compliance Notes
+
+| Action | Risk Level | Mitigation |
+|--------|-----------|------------|
+| Greenhouse/Lever public endpoints | Low | Official/community-standard APIs |
+| JobSpy scraping Indeed/LinkedIn | Medium | Personal use only; rate limit; rotate UA; honor robots.txt |
+| Scraping Glassdoor | High | Avoid; they have pursued litigation |
+| Storing job seeker PII | Medium | Encrypt at rest; GDPR-compliant data deletion; privacy policy |
+| LinkedIn profile scraping | Very High | Do NOT scrape LinkedIn user profiles |
+
+**Key rules:**
+- Never scrape authenticated pages or bypass CAPTCHAs
+- Respect `robots.txt` on all crawled domains
+- Add 3–5s delays between requests; implement exponential backoff
+- Do not store scraped job *applicant* data — only job *posting* data
+- If productionizing commercially, migrate away from ToS-violating scrapers to licensed APIs
+
+---
+
+## Project File Structure
+
+```
+job-scraper/
+├── STRATEGY.md                    # this file
+├── docker-compose.yml             # postgres, redis, api, worker, frontend
+├── .env.example
+│
+├── backend/                       # FastAPI application
+│   ├── app/
+│   │   ├── main.py
+│   │   ├── config.py
+│   │   ├── database.py
+│   │   ├── models/                # SQLAlchemy models
+│   │   │   ├── user.py
+│   │   │   ├── profile.py
+│   │   │   ├── job.py
+│   │   │   └── match.py
+│   │   ├── routers/               # API route handlers
+│   │   │   ├── auth.py
+│   │   │   ├── profile.py
+│   │   │   ├── jobs.py
+│   │   │   └── matches.py
+│   │   ├── services/
+│   │   │   ├── embedding.py       # sentence-transformer wrapper
+│   │   │   ├── matching.py        # vector search + re-ranking
+│   │   │   ├── resume_parser.py   # PDF/DOCX + spaCy NER
+│   │   │   └── scraping/
+│   │   │       ├── jobspy_scraper.py
+│   │   │       ├── greenhouse_scraper.py
+│   │   │       ├── lever_scraper.py
+│   │   │       └── playwright_scraper.py
+│   │   └── tasks/                 # Celery task definitions
+│   │       ├── scrape_tasks.py
+│   │       └── embed_tasks.py
+│   ├── alembic/                   # DB migrations
+│   ├── tests/
+│   ├── requirements.txt
+│   └── Dockerfile
+│
+├── frontend/                      # Next.js application
+│   ├── app/
+│   │   ├── (auth)/login/
+│   │   ├── (auth)/register/
+│   │   ├── profile/               # resume upload + profile editing
+│   │   ├── jobs/                  # job feed + match scores
+│   │   └── saved/                 # saved jobs + application tracker
+│   ├── components/
+│   ├── lib/
+│   ├── package.json
+│   └── Dockerfile
+│
+└── scripts/
+    ├── seed_greenhouse_companies.py
+    ├── seed_lever_companies.py
+    └── backfill_embeddings.py
+```
+
+---
+
+## Phase 1 Implementation Plan (Current)
+
+**Goal:** Scaffold the project, get a working API with user + profile CRUD, and a Postgres DB running locally.
+
+Tasks:
+- [ ] `docker-compose.yml` with Postgres 16 + pgvector + Redis
+- [ ] FastAPI app skeleton with health check
+- [ ] SQLAlchemy models: `users`, `profiles`, `jobs`, `matches`
+- [ ] Alembic migrations
+- [ ] Auth routes: register, login, JWT
+- [ ] Profile routes: create/read/update
+- [ ] Next.js app with login + profile editor pages
+- [ ] `.env.example` with all required env vars
+
+**Phase 1 does NOT include:** scraping, embeddings, or matching — those come in Phases 2–4.
+
+---
+
+## Phase 2 Implementation Plan (Next)
+
+**Goal:** Ingest real jobs into the `jobs` table.
+
+Tasks:
+- [ ] Celery worker setup with Redis broker
+- [ ] `greenhouse_scraper.py` — fetch all jobs from top 200 Greenhouse companies
+- [ ] `lever_scraper.py` — fetch from top 200 Lever companies
+- [ ] `jobspy_scraper.py` — keyword search on Indeed + ZipRecruiter based on desired titles from user profiles
+- [ ] Admin endpoint to trigger scrape jobs manually
+- [ ] Deduplication logic (hash on `source + external_id`)
+- [ ] Scheduled cron: refresh job listings every 24h
+
+---
+
+## Key Decisions Log
+
+| Date | Decision | Rationale |
+|------|----------|-----------|
+| 2026-03-26 | PostgreSQL + pgvector over dedicated vector DB | Simpler ops; handles 10M+ vectors; can always migrate |
+| 2026-03-26 | FastAPI (Python) over Node.js backend | Python ecosystem for NLP (spaCy, sentence-transformers, pdfminer) is far superior |
+| 2026-03-26 | sentence-transformers (local) over OpenAI embeddings | No per-token cost; runs in Celery worker; good enough quality |
+| 2026-03-26 | python-jobspy for scraping | Purpose-built, maintained, handles anti-bot measures better than raw scrapers |
+| 2026-03-26 | Next.js for frontend | Full-stack in one framework; file-based routing; easy API proxying |
