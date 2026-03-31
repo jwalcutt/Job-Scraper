@@ -59,6 +59,21 @@ services:
       - ./backend:/app
     command: celery -A app.tasks.worker worker --loglevel=info --concurrency=2
 
+  beat:
+    build: ./backend
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://jobscraper:jobscraper@postgres:5432/jobscraper
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    command: celery -A app.tasks.worker beat --loglevel=info
+
   frontend:
     build:
       context: ./frontend
