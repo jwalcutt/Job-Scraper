@@ -1,6 +1,7 @@
 from datetime import datetime
 from typing import Optional
-from sqlalchemy import Integer, ForeignKey, DateTime, Float, Text, String, func, UniqueConstraint
+
+from sqlalchemy import DateTime, Float, ForeignKey, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -17,8 +18,8 @@ class Match(Base):
     explanation: Mapped[Optional[str]] = mapped_column(Text)
     computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    user: Mapped["User"] = relationship(back_populates="matches")
-    job: Mapped["Job"] = relationship(back_populates="matches")
+    user: Mapped["User"] = relationship(back_populates="matches")  # noqa: F821
+    job: Mapped["Job"] = relationship(back_populates="matches")  # noqa: F821
 
 
 class SavedJob(Base):
@@ -30,8 +31,8 @@ class SavedJob(Base):
     job_id: Mapped[int] = mapped_column(ForeignKey("jobs.id"), nullable=False)
     saved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    user: Mapped["User"] = relationship(back_populates="saved_jobs")
-    job: Mapped["Job"] = relationship(back_populates="saved_by")
+    user: Mapped["User"] = relationship(back_populates="saved_jobs")  # noqa: F821
+    job: Mapped["Job"] = relationship(back_populates="saved_by")  # noqa: F821
 
 
 class Application(Base):
@@ -44,5 +45,5 @@ class Application(Base):
     status: Mapped[str] = mapped_column(String(64), default="applied")
     notes: Mapped[Optional[str]] = mapped_column(Text)
 
-    user: Mapped["User"] = relationship(back_populates="applications")
-    job: Mapped["Job"] = relationship(back_populates="applications")
+    user: Mapped["User"] = relationship(back_populates="applications")  # noqa: F821
+    job: Mapped["Job"] = relationship(back_populates="applications")  # noqa: F821

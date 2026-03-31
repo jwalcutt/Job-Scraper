@@ -101,6 +101,7 @@ async def seed_companies(db) -> int:
     Returns the number of new rows inserted.
     """
     from sqlalchemy import select
+
     from app.models.company import Company
 
     inserted = 0

@@ -3,6 +3,7 @@ Celery tasks for embedding generation and match computation.
 """
 import asyncio
 import logging
+
 from app.tasks.worker import celery_app
 
 logger = logging.getLogger(__name__)
@@ -24,10 +25,11 @@ def _run(coro):
 @celery_app.task(name="app.tasks.embed_tasks.embed_job", bind=True, max_retries=3)
 def embed_job(self, job_id: int):
     """Compute and persist the embedding for a single job."""
+    from sqlalchemy import select
+
     from app.database import task_session
     from app.models.job import Job
     from app.services.embedding import embed_job as compute_embedding
-    from sqlalchemy import select
 
     async def _inner():
         async with task_session() as db:
@@ -49,10 +51,11 @@ def embed_job(self, job_id: int):
 @celery_app.task(name="app.tasks.embed_tasks.embed_profile", bind=True, max_retries=3)
 def embed_profile(self, profile_id: int):
     """Recompute the embedding for a profile, then trigger match computation."""
+    from sqlalchemy import select
+
     from app.database import task_session
     from app.models.profile import Profile
     from app.services.embedding import embed_profile as compute_embedding
-    from sqlalchemy import select
 
     async def _inner():
         async with task_session() as db:
@@ -100,9 +103,10 @@ def embed_all_jobs(batch_size: int = 200) -> str:
     Find all jobs with no embedding and dispatch individual embed_job tasks.
     Safe to re-run; already-embedded jobs are skipped.
     """
+    from sqlalchemy import select
+
     from app.database import task_session
     from app.models.job import Job
-    from sqlalchemy import select
 
     async def _get_ids() -> list[int]:
         async with task_session() as db:
@@ -125,9 +129,10 @@ def embed_all_profiles() -> str:
     """
     Find all profiles with no embedding and dispatch individual embed_profile tasks.
     """
+    from sqlalchemy import select
+
     from app.database import task_session
     from app.models.profile import Profile
-    from sqlalchemy import select
 
     async def _get_ids() -> list[int]:
         async with task_session() as db:
@@ -151,9 +156,10 @@ def compute_all_user_matches() -> str:
     Dispatch compute_user_matches for every user who has a profile embedding.
     Run this after a bulk job scrape to refresh everyone's matches.
     """
+    from sqlalchemy import select
+
     from app.database import task_session
     from app.models.profile import Profile
-    from sqlalchemy import select
 
     async def _get_user_ids() -> list[int]:
         async with task_session() as db:

@@ -1,8 +1,9 @@
 from datetime import datetime
 from typing import Optional
-from sqlalchemy import String, Integer, ForeignKey, DateTime, Text, Boolean, func, UniqueConstraint
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+
 from pgvector.sqlalchemy import Vector
+from sqlalchemy import Boolean, DateTime, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.config import settings
 from app.database import Base
@@ -33,6 +34,6 @@ class Job(Base):
     scraped_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
-    matches: Mapped[list["Match"]] = relationship(back_populates="job", cascade="all, delete-orphan")
-    saved_by: Mapped[list["SavedJob"]] = relationship(back_populates="job", cascade="all, delete-orphan")
-    applications: Mapped[list["Application"]] = relationship(back_populates="job", cascade="all, delete-orphan")
+    matches: Mapped[list["Match"]] = relationship(back_populates="job", cascade="all, delete-orphan")  # noqa: F821
+    saved_by: Mapped[list["SavedJob"]] = relationship(back_populates="job", cascade="all, delete-orphan")  # noqa: F821
+    applications: Mapped[list["Application"]] = relationship(back_populates="job", cascade="all, delete-orphan")  # noqa: F821

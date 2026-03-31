@@ -4,13 +4,14 @@ Retrieves top-k jobs for a user profile, applies hard filters,
 and upserts scored results into the matches table.
 """
 from datetime import datetime, timedelta, timezone
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, or_
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from app.models.profile import Profile, RemotePreference
+from sqlalchemy import and_, or_, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.models.job import Job
 from app.models.match import Match
+from app.models.profile import Profile, RemotePreference
 
 
 async def compute_matches(user_id: int, db: AsyncSession, top_k: int = 100) -> int:
@@ -37,9 +38,9 @@ async def compute_matches(user_id: int, db: AsyncSession, top_k: int = 100) -> i
     ]
 
     if profile.remote_preference == RemotePreference.REMOTE:
-        conditions.append(Job.is_remote == True)
+        conditions.append(Job.is_remote.is_(True))
     elif profile.remote_preference == RemotePreference.ONSITE:
-        conditions.append(Job.is_remote == False)
+        conditions.append(Job.is_remote.is_(False))
 
     if profile.desired_salary_min:
         # Allow jobs with no salary info OR jobs where max salary meets minimum

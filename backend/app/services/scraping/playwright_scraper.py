@@ -9,9 +9,7 @@ Supports:
 Rate-limiting: callers should enforce ≥5 s between requests per domain.
 robots.txt compliance is checked before scraping.
 """
-import asyncio
 import logging
-import re
 from typing import Optional
 from urllib.parse import urljoin, urlparse
 from urllib.robotparser import RobotFileParser

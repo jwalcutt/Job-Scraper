@@ -1,12 +1,13 @@
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models.user import User
 from app.models.profile import Profile, RemotePreference
+from app.models.user import User
 from app.services.auth import get_current_user
 
 router = APIRouter(prefix="/profile", tags=["profile"])

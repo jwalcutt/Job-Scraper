@@ -3,7 +3,8 @@ Admin endpoints for manually triggering scrapes and inspecting task status.
 In production, protect these behind an API key or restrict to internal network.
 """
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, Header
+
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel
 
 from app.config import settings
@@ -126,11 +127,12 @@ def get_task_status(task_id: str):
 @router.get("/stats", dependencies=[Depends(require_admin)])
 async def get_stats():
     """Return high-level counts for jobs, profiles, matches."""
+    from sqlalchemy import func, select
+
     from app.database import AsyncSessionLocal
     from app.models.job import Job
-    from app.models.profile import Profile
     from app.models.match import Match
-    from sqlalchemy import select, func
+    from app.models.profile import Profile
 
     async with AsyncSessionLocal() as db:
         job_count = (await db.execute(select(func.count()).select_from(Job))).scalar()

@@ -7,7 +7,6 @@ Indeed + ZipRecruiter which have lower enforcement risk for personal/research us
 Set SCRAPER_INCLUDE_LINKEDIN=true in .env to opt in (requires a proxy).
 """
 import logging
-import os
 
 from app.config import settings
 
@@ -109,7 +108,8 @@ async def collect_search_terms_from_profiles(db) -> list[str]:
     into a deduplicated list of search terms to feed to JobSpy.
     Capped at 30 unique terms to avoid flooding the scrapers.
     """
-    from sqlalchemy import select, func
+    from sqlalchemy import func, select
+
     from app.models.profile import Profile
 
     result = await db.execute(

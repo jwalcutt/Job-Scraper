@@ -6,6 +6,7 @@ Celery tasks for LLM-powered features:
 """
 import asyncio
 import logging
+
 from app.tasks.worker import celery_app
 
 logger = logging.getLogger(__name__)
@@ -30,12 +31,13 @@ def explain_matches_for_user(self, user_id: int, top_k: int = 10, force: bool = 
         top_k:   How many top matches to explain (default 10 to control API cost).
         force:   If True, overwrite existing explanations.
     """
+    from sqlalchemy import and_, desc, select
+
     from app.database import AsyncSessionLocal
-    from app.models.match import Match
     from app.models.job import Job
+    from app.models.match import Match
     from app.models.profile import Profile
     from app.services.llm import match_explanation
-    from sqlalchemy import select, desc, and_
 
     async def _inner() -> str:
         async with AsyncSessionLocal() as db:
@@ -83,12 +85,13 @@ def rerank_matches_for_user(self, user_id: int, top_k: int = 20):
     Re-rank a user's top-k matches using Claude and update scores + explanations.
     The re-ranking overwrites match scores with LLM-informed ranks (normalised 0–1).
     """
+    from sqlalchemy import desc, select
+
     from app.database import AsyncSessionLocal
-    from app.models.match import Match
     from app.models.job import Job
+    from app.models.match import Match
     from app.models.profile import Profile
     from app.services.llm import rerank_and_explain
-    from sqlalchemy import select, desc
 
     async def _inner() -> str:
         async with AsyncSessionLocal() as db:
@@ -144,9 +147,10 @@ def explain_all_users(top_k: int = 10, force: bool = False) -> str:
     Dispatch explain_matches_for_user for every user who has matches.
     Called by the admin endpoint or on a schedule.
     """
+    from sqlalchemy import distinct, select
+
     from app.database import AsyncSessionLocal
     from app.models.match import Match
-    from sqlalchemy import select, distinct
 
     async def _get_user_ids() -> list[int]:
         async with AsyncSessionLocal() as db:
@@ -165,9 +169,10 @@ def explain_all_users(top_k: int = 10, force: bool = False) -> str:
 @celery_app.task(name="app.tasks.llm_tasks.rerank_all_users")
 def rerank_all_users(top_k: int = 20) -> str:
     """Dispatch rerank_matches_for_user for every user who has matches."""
+    from sqlalchemy import distinct, select
+
     from app.database import AsyncSessionLocal
     from app.models.match import Match
-    from sqlalchemy import select, distinct
 
     async def _get_user_ids() -> list[int]:
         async with AsyncSessionLocal() as db:

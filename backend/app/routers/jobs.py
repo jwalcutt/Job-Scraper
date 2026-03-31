@@ -1,15 +1,16 @@
 import re
-from typing import Optional
 from datetime import datetime
-from fastapi import APIRouter, Depends, Query, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc, or_, func, text
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
+from sqlalchemy import desc, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models.user import User
 from app.models.job import Job
 from app.models.match import Match, SavedJob
+from app.models.user import User
 from app.services.auth import get_current_user
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
@@ -160,14 +161,19 @@ async def search_jobs(
     Returns jobs ranked by text relevance (ts_rank). Not personalised.
     """
     # plainto_tsquery is safer than to_tsquery — handles arbitrary user input
-    fts_expr = text(
-        "to_tsvector('english', coalesce(title,'') || ' ' || coalesce(company,'') || ' ' || coalesce(description,''))"
+    tsvector = func.to_tsvector(
+        "english",
+        func.concat(
+            func.coalesce(Job.title, ""), " ",
+            func.coalesce(Job.company, ""), " ",
+            func.coalesce(Job.description, ""),
+        ),
     )
     tsquery = func.plainto_tsquery("english", q)
 
     stmt = (
-        select(Job, func.ts_rank(fts_expr, tsquery).label("rank"))
-        .where(fts_expr.op("@@")(tsquery))
+        select(Job, func.ts_rank(tsvector, tsquery).label("rank"))
+        .where(tsvector.op("@@")(tsquery))
     )
 
     if remote is not None:

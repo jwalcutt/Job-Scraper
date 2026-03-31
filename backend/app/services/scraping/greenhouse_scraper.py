@@ -82,8 +82,7 @@ GREENHOUSE_COMPANIES: list[str] = [
 ]
 
 # Remove duplicates while preserving order
-_seen: set[str] = set()
-GREENHOUSE_COMPANIES = [t for t in GREENHOUSE_COMPANIES if not (_seen.add(t) or t in _seen)]  # type: ignore[func-returns-value]
+GREENHOUSE_COMPANIES = list(dict.fromkeys(GREENHOUSE_COMPANIES))
 
 BASE_URL = "https://boards-api.greenhouse.io/v1/boards/{token}/jobs"
 

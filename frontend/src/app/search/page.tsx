@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 
 interface Job {
   id: number;
@@ -26,19 +26,25 @@ export default function SearchPage() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
+  const [searchError, setSearchError] = useState("");
 
   async function handleSearch(e: React.FormEvent) {
     e.preventDefault();
     if (q.trim().length < 2) return;
     setLoading(true);
+    setSearchError("");
     try {
       const params = new URLSearchParams({ q: q.trim(), limit: "50" });
       if (remote) params.set("remote", remote);
       const data = await api.get<Job[]>(`/jobs/search?${params}`);
       setJobs(data);
       setSearched(true);
-    } catch {
-      router.push("/login");
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        router.push("/login");
+      } else {
+        setSearchError("Search failed. Please try again.");
+      }
     } finally {
       setLoading(false);
     }
@@ -76,6 +82,10 @@ export default function SearchPage() {
           {loading ? "…" : "Search"}
         </button>
       </form>
+
+      {searchError && (
+        <p className="text-sm text-red-600 mb-4">{searchError}</p>
+      )}
 
       {searched && (
         <p className="text-sm text-gray-500 mb-4">

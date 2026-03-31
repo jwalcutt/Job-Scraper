@@ -1,5 +1,4 @@
 """Tests for POST /auth/register and POST /auth/login."""
-import pytest
 from httpx import AsyncClient
 
 

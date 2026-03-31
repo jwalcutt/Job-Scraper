@@ -4,10 +4,11 @@ Revision ID: 001
 Revises:
 Create Date: 2026-03-26
 """
-from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.dialects.postgresql import ARRAY
 from pgvector.sqlalchemy import Vector
+from sqlalchemy.dialects.postgresql import ARRAY
+
+from alembic import op
 
 revision = "001"
 down_revision = None
@@ -107,12 +108,12 @@ def upgrade() -> None:
 
     # Vector index for fast cosine similarity search
     op.execute(
-        f"CREATE INDEX ix_jobs_embedding_hnsw ON jobs USING hnsw (embedding vector_cosine_ops) "
-        f"WITH (m = 16, ef_construction = 64)"
+        "CREATE INDEX ix_jobs_embedding_hnsw ON jobs USING hnsw (embedding vector_cosine_ops) "
+        "WITH (m = 16, ef_construction = 64)"
     )
     op.execute(
-        f"CREATE INDEX ix_profiles_embedding_hnsw ON profiles USING hnsw (resume_embedding vector_cosine_ops) "
-        f"WITH (m = 16, ef_construction = 64)"
+        "CREATE INDEX ix_profiles_embedding_hnsw ON profiles USING hnsw (resume_embedding vector_cosine_ops) "
+        "WITH (m = 16, ef_construction = 64)"
     )
 
 

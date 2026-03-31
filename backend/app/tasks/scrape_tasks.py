@@ -3,6 +3,7 @@ Celery tasks for job scraping.
 """
 import asyncio
 import logging
+
 from app.tasks.worker import celery_app
 
 logger = logging.getLogger(__name__)
@@ -22,10 +23,11 @@ def _upsert_jobs(jobs_data: list[dict]) -> tuple[int, int]:
     Persist a list of job dicts into the database.
     Returns (new_count, updated_count).
     """
+    from sqlalchemy import select
+
     from app.database import task_session as AsyncSessionLocal
     from app.models.job import Job
     from app.tasks.embed_tasks import embed_job
-    from sqlalchemy import select
 
     async def _inner() -> tuple[int, int]:
         new_count = 0
@@ -158,9 +160,10 @@ def scrape_company_careers(self, company_id: int):
     """
     from datetime import datetime, timezone
 
+    from sqlalchemy import select
+
     from app.database import task_session as AsyncSessionLocal
     from app.models.company import Company
-    from sqlalchemy import select
 
     async def _inner():
         async with AsyncSessionLocal() as db:
@@ -205,9 +208,10 @@ def scrape_all_company_careers():
     Fan-out: queue one scrape_company_careers task per active company.
     Called by Celery Beat alongside other scrapers.
     """
+    from sqlalchemy import select
+
     from app.database import task_session as AsyncSessionLocal
     from app.models.company import Company
-    from sqlalchemy import select
 
     async def _get_company_ids() -> list[int]:
         async with AsyncSessionLocal() as db:

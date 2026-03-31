@@ -32,6 +32,8 @@ Thumbs.db
 # Agents
 .claude
 STRATEGY.md
+AGENTS.md
+BUGS.md
 .agents
 .windsurf
 skills-lock.json

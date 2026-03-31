@@ -1,5 +1,6 @@
 from datetime import datetime
-from sqlalchemy import String, DateTime, func
+
+from sqlalchemy import DateTime, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -16,7 +17,7 @@ class User(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
-    profile: Mapped["Profile"] = relationship(back_populates="user", uselist=False, cascade="all, delete-orphan")
-    saved_jobs: Mapped[list["SavedJob"]] = relationship(back_populates="user", cascade="all, delete-orphan")
-    applications: Mapped[list["Application"]] = relationship(back_populates="user", cascade="all, delete-orphan")
-    matches: Mapped[list["Match"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    profile: Mapped["Profile"] = relationship(back_populates="user", uselist=False, cascade="all, delete-orphan")  # noqa: F821
+    saved_jobs: Mapped[list["SavedJob"]] = relationship(back_populates="user", cascade="all, delete-orphan")  # noqa: F821
+    applications: Mapped[list["Application"]] = relationship(back_populates="user", cascade="all, delete-orphan")  # noqa: F821
+    matches: Mapped[list["Match"]] = relationship(back_populates="user", cascade="all, delete-orphan")  # noqa: F821

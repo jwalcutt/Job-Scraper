@@ -1,12 +1,13 @@
 from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete
 from pydantic import BaseModel, EmailStr
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models.user import User
 from app.models.profile import Profile
+from app.models.user import User
 from app.services.auth import get_current_user, hash_password, verify_password
 
 router = APIRouter(prefix="/users", tags=["users"])

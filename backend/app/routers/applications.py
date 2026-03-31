@@ -1,14 +1,15 @@
-from typing import Optional
 from datetime import datetime
+from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc
 from pydantic import BaseModel
+from sqlalchemy import desc, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models.user import User
 from app.models.job import Job
 from app.models.match import Application, SavedJob
+from app.models.user import User
 from app.services.auth import get_current_user
 
 router = APIRouter(prefix="/applications", tags=["applications"])

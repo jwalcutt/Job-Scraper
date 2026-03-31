@@ -3,7 +3,6 @@ Extract text from uploaded resume files (PDF and DOCX).
 Optionally uses spaCy NER to suggest skills and titles.
 """
 import io
-from typing import Optional
 
 
 def extract_text_from_pdf(content: bytes) -> str:

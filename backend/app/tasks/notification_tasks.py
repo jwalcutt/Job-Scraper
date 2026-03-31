@@ -26,13 +26,14 @@ def send_digest_for_user(user_id: int) -> str:
     Send a match digest email to a single user if they have new matches
     above their notification threshold since last_notified_at.
     """
+    from sqlalchemy import and_, desc, select
+
     from app.database import AsyncSessionLocal
-    from app.models.profile import Profile
-    from app.models.match import Match
     from app.models.job import Job
+    from app.models.match import Match
+    from app.models.profile import Profile
     from app.models.user import User
     from app.services.notifications import send_match_digest
-    from sqlalchemy import select, desc, and_
 
     async def _inner() -> str:
         async with AsyncSessionLocal() as db:
@@ -90,7 +91,7 @@ def send_digest_for_user(user_id: int) -> str:
                 await db.commit()
                 return f"digest sent to {to_email} ({len(matches_data)} matches)"
             else:
-                return f"digest skipped (SMTP not configured or send failed)"
+                return "digest skipped (SMTP not configured or send failed)"
 
     return _run(_inner())
 
@@ -101,14 +102,15 @@ def send_all_digests() -> str:
     Fan out digest tasks to all users who have notifications enabled.
     Called by Celery Beat after the daily match recompute settles.
     """
+    from sqlalchemy import select
+
     from app.database import AsyncSessionLocal
     from app.models.profile import Profile
-    from sqlalchemy import select
 
     async def _get_user_ids() -> list[int]:
         async with AsyncSessionLocal() as db:
             result = await db.execute(
-                select(Profile.user_id).where(Profile.notifications_enabled == True)
+                select(Profile.user_id).where(Profile.notifications_enabled.is_(True))
             )
             return [row.user_id for row in result.all()]
 

@@ -90,8 +90,7 @@ LEVER_COMPANIES: list[str] = [
 ]
 
 # Deduplicate while preserving order
-_seen: set[str] = set()
-LEVER_COMPANIES = [c for c in LEVER_COMPANIES if not (_seen.add(c) or c in _seen)]  # type: ignore[func-returns-value]
+LEVER_COMPANIES = list(dict.fromkeys(LEVER_COMPANIES))
 
 BASE_URL = "https://api.lever.co/v0/postings/{company}"
 
@@ -115,7 +114,6 @@ def _fetch_company_jobs(client: httpx.Client, company: str) -> list[dict]:
         all_locations = categories.get("allLocations") or []
         location = categories.get("location") or (all_locations[0] if all_locations else "")
         commitment = categories.get("commitment", "")
-        team = categories.get("team", "")
 
         is_remote = (
             "remote" in location.lower()
