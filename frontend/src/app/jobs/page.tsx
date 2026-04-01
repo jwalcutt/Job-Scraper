@@ -264,10 +264,10 @@ export default function JobsPage() {
       {/* Job cards */}
       <div className="space-y-2">
         {jobs.map((job) => (
-          <Link
+          <div
             key={job.id}
-            href={`/jobs/${job.id}`}
-            className="block rounded-lg border border-gray-200 bg-white hover:border-gray-300 hover:shadow-sm transition-all overflow-hidden"
+            onClick={() => router.push(`/jobs/${job.id}`)}
+            className="block rounded-lg border border-gray-200 bg-white hover:border-gray-300 hover:shadow-sm transition-all overflow-hidden cursor-pointer"
           >
             <div className="flex items-start gap-3 p-4">
               <div className="min-w-0 flex-1">
@@ -313,7 +313,7 @@ export default function JobsPage() {
                 )}
               </div>
             </div>
-          </Link>
+          </div>
         ))}
       </div>
 

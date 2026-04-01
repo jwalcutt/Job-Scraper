@@ -24,6 +24,7 @@ interface Job {
 interface SkillsGap {
   matching: string[];
   missing: string[];
+  error?: string | null;
 }
 
 function formatSalary(min: number | null, max: number | null): string {
@@ -40,6 +41,8 @@ export default function JobDetailPage() {
   const [job, setJob] = useState<Job | null>(null);
   const [gap, setGap] = useState<SkillsGap | null>(null);
   const [gapLoading, setGapLoading] = useState(false);
+  const [gapUnavailable, setGapUnavailable] = useState(false);
+  const [gapError, setGapError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -65,9 +68,26 @@ export default function JobDetailPage() {
     setGapLoading(true);
     try {
       const result = await api.get<SkillsGap>(`/jobs/${job.id}/skills-gap`);
-      setGap(result);
+      if (result.error) {
+        setGap(null);
+        if (result.error === "insufficient_credits") {
+          setGapError("Your Anthropic API account has insufficient credits. Add credits at console.anthropic.com.");
+        } else if (result.error === "no_api_key") {
+          setGapUnavailable(true);
+        } else if (result.error === "no_profile_data") {
+          setGapUnavailable(true);
+        } else {
+          setGapError("Skills analysis failed — the AI service returned an error. Try again later.");
+        }
+      } else if (result.matching.length === 0 && result.missing.length === 0) {
+        setGap(null);
+        setGapUnavailable(true);
+      } else {
+        setGap(result);
+      }
     } catch {
-      setGap({ matching: [], missing: [] });
+      setGap(null);
+      setGapUnavailable(true);
     } finally {
       setGapLoading(false);
     }
@@ -157,7 +177,7 @@ export default function JobDetailPage() {
       <div className="rounded-xl border border-gray-200 bg-white p-6 mb-6">
         <div className="flex items-center justify-between mb-3">
           <h2 className="font-semibold text-gray-900">Skills analysis</h2>
-          {!gap && (
+          {!gap && !gapUnavailable && !gapError && (
             <button
               onClick={loadSkillsGap}
               disabled={gapLoading}
@@ -168,9 +188,20 @@ export default function JobDetailPage() {
           )}
         </div>
 
-        {!gap && !gapLoading && (
+        {!gap && !gapLoading && !gapUnavailable && !gapError && (
           <p className="text-sm text-gray-500">
             Click &ldquo;Analyze my fit&rdquo; to compare your skills against this job&apos;s requirements.
+          </p>
+        )}
+
+        {gapError && (
+          <p className="text-sm text-red-600">{gapError}</p>
+        )}
+
+        {gapUnavailable && (
+          <p className="text-sm text-gray-500">
+            Skills analysis requires an Anthropic API key and a profile with skills or a resume.
+            Add your skills in <a href="/profile" className="text-brand-600 hover:underline">Profile settings</a>.
           </p>
         )}
 

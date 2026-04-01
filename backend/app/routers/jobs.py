@@ -40,6 +40,7 @@ class JobResponse(BaseModel):
 class SkillsGapResponse(BaseModel):
     matching: list[str]
     missing: list[str]
+    error: str | None = None
 
 
 def _strip_html(s: str) -> str:

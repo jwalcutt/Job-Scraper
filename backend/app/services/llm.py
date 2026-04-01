@@ -155,15 +155,24 @@ def skills_gap(profile, job) -> dict:
     """
     client = _client()
     if not client:
-        return {"matching": [], "missing": []}
+        return {"matching": [], "missing": [], "error": "no_api_key"}
 
-    user_skills = ", ".join(profile.skills) if profile.skills else "Not specified"
+    # Build candidate background: prefer explicit skills list; fall back to resume text
+    if profile.skills:
+        candidate_info = f"Skills: {', '.join(profile.skills)}"
+        if profile.resume_text:
+            candidate_info += f"\nResume excerpt: {profile.resume_text[:MAX_RESUME]}"
+    elif profile.resume_text:
+        candidate_info = f"Resume excerpt: {profile.resume_text[:MAX_RESUME]}"
+    else:
+        return {"matching": [], "missing": [], "error": "no_profile_data"}
+
     desc = (job.description or "")[:1200]
 
     prompt = (
         f"Job: {job.title} at {job.company}\n"
         f"Job description excerpt:\n{desc}\n\n"
-        f"Candidate's skills: {user_skills}\n\n"
+        f"Candidate background:\n{candidate_info}\n\n"
         "Analyze the job requirements and identify:\n"
         "1. Skills the candidate HAS that are relevant to this job\n"
         "2. Skills the candidate is MISSING that are required or strongly preferred\n\n"
@@ -180,7 +189,14 @@ def skills_gap(profile, job) -> dict:
         raw = msg.content[0].text.strip()
         if raw.startswith("```"):
             raw = raw.split("\n", 1)[1].rsplit("```", 1)[0].strip()
-        return json.loads(raw)
+        result = json.loads(raw)
+        result.setdefault("error", None)
+        return result
     except Exception as exc:
         logger.warning("[llm.skills_gap] job_id=%s: %s", job.id, exc)
-        return {"matching": [], "missing": []}
+        err_str = str(exc)
+        if "credit" in err_str.lower() or "balance" in err_str.lower() or "billing" in err_str.lower():
+            error_code = "insufficient_credits"
+        else:
+            error_code = "api_error"
+        return {"matching": [], "missing": [], "error": error_code}
