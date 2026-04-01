@@ -3,5 +3,6 @@ from app.models.job import Job
 from app.models.match import Application, Match, SavedJob
 from app.models.profile import Profile
 from app.models.user import User
+from app.models.user_event import UserEvent
 
-__all__ = ["User", "Profile", "Job", "Match", "SavedJob", "Application", "Company"]
+__all__ = ["User", "Profile", "Job", "Match", "SavedJob", "Application", "Company", "UserEvent"]

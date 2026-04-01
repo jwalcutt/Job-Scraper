@@ -183,6 +183,31 @@ class TestSkillsGapFunction:
         assert "Python" in call_prompt
         assert "FastAPI" in call_prompt
 
+    def test_uses_both_skills_and_resume_when_both_present(self):
+        """When both skills and resume_text are present, both should appear in the prompt."""
+        mock_response = MagicMock()
+        mock_response.content = [MagicMock(text='{"matching": ["Python"], "missing": ["Go"]}')]
+        mock_client = MagicMock()
+        mock_client.messages.create.return_value = mock_response
+
+        profile = self._make_profile(
+            skills=["Python", "FastAPI"],
+            resume_text="Senior engineer with 5 years Python experience.",
+        )
+        job = self._make_job()
+
+        with patch("app.services.llm.settings") as mock_settings, \
+             patch("app.services.llm._client", return_value=mock_client):
+            mock_settings.anthropic_api_key = "fake-key"
+            result = skills_gap(profile, job)
+
+        call_prompt = mock_client.messages.create.call_args[1]["messages"][0]["content"]
+        assert "Python" in call_prompt
+        assert "FastAPI" in call_prompt
+        assert "Resume excerpt" in call_prompt
+        assert "Senior engineer" in call_prompt
+        assert result["matching"] == ["Python"]
+
     def test_handles_json_parse_error_gracefully(self):
         """Malformed JSON from Claude falls back to empty lists with api_error code."""
         mock_response = MagicMock()

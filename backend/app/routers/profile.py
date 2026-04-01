@@ -25,8 +25,27 @@ class ProfileResponse(BaseModel):
     years_experience: Optional[int]
     skills: list[str]
     has_resume: bool
+    completeness_score: int = 0
+    completeness_tips: list[str] = []
 
     model_config = {"from_attributes": True}
+
+
+def _compute_completeness(profile: Profile) -> tuple[int, list[str]]:
+    """Compute 0-100 profile completeness score with actionable tips."""
+    fields = [
+        (bool(profile.full_name), 10, "Add your full name"),
+        (bool(profile.location), 10, "Add your location"),
+        (profile.remote_preference != RemotePreference.ANY, 5, "Set your remote work preference"),
+        (bool(profile.desired_titles), 15, "Add your desired job titles to improve match quality"),
+        (bool(profile.skills), 20, "Add your skills to improve match quality"),
+        (bool(profile.resume_text), 25, "Upload your resume for the best matching"),
+        (bool(profile.years_experience), 5, "Add your years of experience"),
+        (bool(profile.desired_salary_min or profile.desired_salary_max), 10, "Set your salary expectations"),
+    ]
+    score = sum(weight for filled, weight, _ in fields if filled)
+    tips = [tip for filled, _, tip in fields if not filled]
+    return score, tips
 
 
 class ProfileUpdate(BaseModel):
@@ -50,9 +69,12 @@ async def get_profile(
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found")
 
+    score, tips = _compute_completeness(profile)
     return ProfileResponse(
-        **{c: getattr(profile, c) for c in ProfileResponse.model_fields if c != "has_resume"},
+        **{c: getattr(profile, c) for c in ProfileResponse.model_fields if c not in ("has_resume", "completeness_score", "completeness_tips")},
         has_resume=bool(profile.resume_text),
+        completeness_score=score,
+        completeness_tips=tips,
     )
 
 
@@ -85,9 +107,12 @@ async def update_profile(
         from app.tasks.embed_tasks import embed_profile
         embed_profile.delay(profile.id)
 
+    score, tips = _compute_completeness(profile)
     return ProfileResponse(
-        **{c: getattr(profile, c) for c in ProfileResponse.model_fields if c != "has_resume"},
+        **{c: getattr(profile, c) for c in ProfileResponse.model_fields if c not in ("has_resume", "completeness_score", "completeness_tips")},
         has_resume=bool(profile.resume_text),
+        completeness_score=score,
+        completeness_tips=tips,
     )
 
 

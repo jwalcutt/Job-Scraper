@@ -11,7 +11,10 @@ from app.database import get_db
 from app.models.job import Job
 from app.models.match import Match, SavedJob
 from app.models.user import User
+from app.models.user_event import UserEvent
 from app.services.auth import get_current_user
+
+VALID_EVENT_TYPES = {"job_viewed", "job_dismissed", "job_applied"}
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
@@ -308,3 +311,35 @@ async def unsave_job(
         await db.delete(saved)
         await db.commit()
     return {"saved": False}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# User event tracking (implicit feedback)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class EventRequest(BaseModel):
+    event_type: str
+
+
+@router.post("/{job_id}/events")
+async def record_event(
+    job_id: int,
+    body: EventRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Record a user interaction event (job_viewed, job_dismissed, job_applied)."""
+    if body.event_type not in VALID_EVENT_TYPES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"event_type must be one of: {', '.join(sorted(VALID_EVENT_TYPES))}",
+        )
+
+    job_result = await db.execute(select(Job).where(Job.id == job_id))
+    if not job_result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    db.add(UserEvent(user_id=current_user.id, job_id=job_id, event_type=body.event_type))
+    await db.commit()
+    return {"recorded": True}
