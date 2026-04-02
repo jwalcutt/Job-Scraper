@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
+import Nav from "@/components/Nav";
 import { api } from "@/lib/api";
 
 interface NotificationSettings {
@@ -34,11 +34,6 @@ export default function SettingsPage() {
   const [passwordSaving, setPasswordSaving] = useState(false);
 
   // Notifications
-  const [notifSettings, setNotifSettings] = useState<NotificationSettings>({
-    notifications_enabled: false,
-    notification_email: null,
-    notification_min_score: 0.6,
-  });
   const [notifEmail, setNotifEmail] = useState("");
   const [notifMinScore, setNotifMinScore] = useState("0.6");
   const [notifEnabled, setNotifEnabled] = useState(false);
@@ -62,7 +57,6 @@ export default function SettingsPage() {
   useEffect(() => {
     api.get<NotificationSettings>("/users/me/notifications")
       .then((notif) => {
-        setNotifSettings(notif);
         setNotifEnabled(notif.notifications_enabled);
         setNotifEmail(notif.notification_email ?? "");
         setNotifMinScore(String(notif.notification_min_score));
@@ -70,7 +64,6 @@ export default function SettingsPage() {
       })
       .catch(() => router.push("/login"));
 
-    // Alerts fetch is independent — don't redirect on failure
     api.get<JobAlert[]>("/alerts")
       .then(setAlerts)
       .catch(() => {});
@@ -78,25 +71,14 @@ export default function SettingsPage() {
 
   async function handlePasswordChange(e: React.FormEvent) {
     e.preventDefault();
-    if (newPassword !== confirmPassword) {
-      setPasswordMsg("New passwords do not match.");
-      return;
-    }
-    if (newPassword.length < 8) {
-      setPasswordMsg("Password must be at least 8 characters.");
-      return;
-    }
+    if (newPassword !== confirmPassword) { setPasswordMsg("New passwords do not match."); return; }
+    if (newPassword.length < 8) { setPasswordMsg("Password must be at least 8 characters."); return; }
     setPasswordSaving(true);
     setPasswordMsg("");
     try {
-      await api.post("/users/me/change-password", {
-        current_password: currentPassword,
-        new_password: newPassword,
-      });
+      await api.post("/users/me/change-password", { current_password: currentPassword, new_password: newPassword });
       setPasswordMsg("Password updated successfully.");
-      setCurrentPassword("");
-      setNewPassword("");
-      setConfirmPassword("");
+      setCurrentPassword(""); setNewPassword(""); setConfirmPassword("");
     } catch {
       setPasswordMsg("Failed to update password. Check your current password.");
     } finally {
@@ -134,10 +116,7 @@ export default function SettingsPage() {
         min_score: parseFloat(alertMinScore) || 0.6,
       });
       setAlerts((prev) => [newAlert, ...prev]);
-      setAlertTitle("");
-      setAlertLocation("");
-      setAlertRemote("any");
-      setAlertMinScore("0.6");
+      setAlertTitle(""); setAlertLocation(""); setAlertRemote("any"); setAlertMinScore("0.6");
       setAlertMsg("Alert created. You'll receive emails when matching jobs are found.");
     } catch {
       setAlertMsg("Failed to create alert.");
@@ -150,18 +129,14 @@ export default function SettingsPage() {
     try {
       await api.delete(`/alerts/${alertId}`);
       setAlerts((prev) => prev.filter((a) => a.id !== alertId));
-    } catch {
-      // silent
-    }
+    } catch { /* silent */ }
   }
 
   async function handleToggleAlert(alertId: number) {
     try {
       const updated = await api.patch<JobAlert>(`/alerts/${alertId}`, {});
       setAlerts((prev) => prev.map((a) => (a.id === alertId ? updated : a)));
-    } catch {
-      // silent
-    }
+    } catch { /* silent */ }
   }
 
   async function handleDeleteAccount() {
@@ -178,304 +153,219 @@ export default function SettingsPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <p className="text-gray-400 text-sm">Loading…</p>
+      <div className="min-h-screen">
+        <Nav />
+        <div className="flex items-center justify-center py-32 text-gray-400 text-sm">Loading...</div>
       </div>
     );
   }
 
+  const inputClass = "w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-400 transition-shadow";
+
   return (
-    <div className="mx-auto max-w-2xl px-4 py-10">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-8">
-        <h1 className="text-2xl font-bold text-gray-900">Settings</h1>
-        <div className="flex gap-4 text-sm">
-          <Link href="/jobs" className="text-brand-600 hover:underline">Matches</Link>
-          <Link href="/applications" className="text-gray-500 hover:text-gray-700">Applications</Link>
+    <div className="min-h-screen">
+      <Nav />
+      <div className="mx-auto max-w-2xl px-4 py-8">
+        <h1 className="text-2xl font-extrabold tracking-tight text-gray-900 mb-6">Settings</h1>
+
+        <div className="space-y-4">
+          {/* Change Password */}
+          <section className="bg-white rounded-xl p-6 shadow-card">
+            <h2 className="text-base font-bold text-gray-900 mb-4">Change password</h2>
+            <form onSubmit={handlePasswordChange} className="space-y-3">
+              <div>
+                <label className="block text-[10px] font-semibold uppercase tracking-wider text-gray-400 mb-1">Current password</label>
+                <input type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} required className={inputClass} />
+              </div>
+              <div>
+                <label className="block text-[10px] font-semibold uppercase tracking-wider text-gray-400 mb-1">New password</label>
+                <input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} required minLength={8} className={inputClass} />
+              </div>
+              <div>
+                <label className="block text-[10px] font-semibold uppercase tracking-wider text-gray-400 mb-1">Confirm new password</label>
+                <input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} required className={inputClass} />
+              </div>
+              {passwordMsg && (
+                <p className={`text-sm ${passwordMsg.includes("successfully") ? "text-green-600" : "text-red-600"}`}>{passwordMsg}</p>
+              )}
+              <button type="submit" disabled={passwordSaving} className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-40 transition-colors shadow-sm">
+                {passwordSaving ? "Saving..." : "Update password"}
+              </button>
+            </form>
+          </section>
+
+          {/* Notification Settings */}
+          <section className="bg-white rounded-xl p-6 shadow-card">
+            <h2 className="text-base font-bold text-gray-900 mb-4">Email notifications</h2>
+            <form onSubmit={handleNotifSave} className="space-y-4">
+              <label className="flex items-center gap-3 cursor-pointer">
+                <input type="checkbox" checked={notifEnabled} onChange={(e) => setNotifEnabled(e.target.checked)} className="w-4 h-4 text-brand-600 rounded border-gray-300" />
+                <span className="text-sm font-medium text-gray-700">Send me daily match digests</span>
+              </label>
+
+              {notifEnabled && (
+                <>
+                  <div>
+                    <label className="block text-[10px] font-semibold uppercase tracking-wider text-gray-400 mb-1">
+                      Notification email <span className="normal-case font-normal">(leave blank to use account email)</span>
+                    </label>
+                    <input type="email" value={notifEmail} onChange={(e) => setNotifEmail(e.target.value)} placeholder="you@example.com" className={inputClass} />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-semibold uppercase tracking-wider text-gray-400 mb-1">
+                      Minimum match score: <span className="text-brand-600">{Math.round(parseFloat(notifMinScore) * 100)}%</span>
+                    </label>
+                    <input type="range" min="0.4" max="0.95" step="0.05" value={notifMinScore} onChange={(e) => setNotifMinScore(e.target.value)} className="w-full accent-brand-600" />
+                    <div className="flex justify-between text-[10px] text-gray-400 mt-0.5">
+                      <span>40% (more results)</span>
+                      <span>95% (only the best)</span>
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {notifMsg && (
+                <p className={`text-sm ${notifMsg.includes("saved") ? "text-green-600" : "text-red-600"}`}>{notifMsg}</p>
+              )}
+              <button type="submit" disabled={notifSaving} className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-40 transition-colors shadow-sm">
+                {notifSaving ? "Saving..." : "Save notifications"}
+              </button>
+            </form>
+          </section>
+
+          {/* Job Alerts */}
+          <section className="bg-white rounded-xl p-6 shadow-card">
+            <h2 className="text-base font-bold text-gray-900 mb-1">Job alerts</h2>
+            <p className="text-sm text-gray-500 mb-4">
+              Create saved searches. We&apos;ll email you when new matching jobs are found (checked every 6 hours).
+            </p>
+
+            {alerts.length > 0 && (
+              <div className="space-y-2 mb-5">
+                {alerts.map((alert) => (
+                  <div
+                    key={alert.id}
+                    className={`flex items-center justify-between rounded-xl border px-4 py-3 text-sm transition-colors ${
+                      alert.is_active ? "border-gray-100 bg-gray-50" : "border-gray-100 bg-gray-50/50 opacity-60"
+                    }`}
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium text-gray-900 truncate">
+                        {[
+                          alert.title && `"${alert.title}"`,
+                          alert.location,
+                          alert.remote === true ? "Remote" : alert.remote === false ? "Onsite" : null,
+                        ].filter(Boolean).join(" \u00B7 ") || "All matches"}
+                      </div>
+                      <div className="text-xs text-gray-400 mt-0.5">
+                        Min score: {Math.round(alert.min_score * 100)}%
+                        {alert.last_alerted_at && ` \u00B7 Last sent: ${new Date(alert.last_alerted_at).toLocaleDateString()}`}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 ml-3 flex-shrink-0">
+                      <button
+                        onClick={() => handleToggleAlert(alert.id)}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${
+                          alert.is_active
+                            ? "text-yellow-700 bg-yellow-50 hover:bg-yellow-100"
+                            : "text-green-700 bg-green-50 hover:bg-green-100"
+                        }`}
+                      >
+                        {alert.is_active ? "Pause" : "Resume"}
+                      </button>
+                      <button
+                        onClick={() => handleDeleteAlert(alert.id)}
+                        className="px-2.5 py-1 rounded-lg text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 transition-colors"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <form onSubmit={handleCreateAlert} className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[10px] font-semibold uppercase tracking-wider text-gray-400 mb-1">Job title keyword</label>
+                  <input type="text" value={alertTitle} onChange={(e) => setAlertTitle(e.target.value)} placeholder="e.g. Backend Engineer" className={inputClass} />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-semibold uppercase tracking-wider text-gray-400 mb-1">Location</label>
+                  <input type="text" value={alertLocation} onChange={(e) => setAlertLocation(e.target.value)} placeholder="e.g. San Francisco" className={inputClass} />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[10px] font-semibold uppercase tracking-wider text-gray-400 mb-1">Remote preference</label>
+                  <select value={alertRemote} onChange={(e) => setAlertRemote(e.target.value)} className={inputClass}>
+                    <option value="any">Any</option>
+                    <option value="true">Remote only</option>
+                    <option value="false">Onsite only</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-semibold uppercase tracking-wider text-gray-400 mb-1">
+                    Min score: {Math.round(parseFloat(alertMinScore) * 100)}%
+                  </label>
+                  <input type="range" min="0.4" max="0.95" step="0.05" value={alertMinScore} onChange={(e) => setAlertMinScore(e.target.value)} className="w-full accent-brand-600 mt-1.5" />
+                </div>
+              </div>
+
+              {alertMsg && (
+                <p className={`text-sm ${alertMsg.includes("created") ? "text-green-600" : "text-red-600"}`}>{alertMsg}</p>
+              )}
+              <button type="submit" disabled={alertCreating} className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-40 transition-colors shadow-sm">
+                {alertCreating ? "Creating..." : "Create alert"}
+              </button>
+            </form>
+          </section>
+
+          {/* Danger Zone */}
+          <section className="bg-white rounded-xl border border-red-200 p-6 shadow-card">
+            <h2 className="text-base font-bold text-red-700 mb-1">Danger zone</h2>
+            <p className="text-sm text-gray-500 mb-4">
+              Deleting your account removes all your data permanently. This cannot be undone.
+            </p>
+            {!showDelete ? (
+              <button
+                onClick={() => setShowDelete(true)}
+                className="rounded-lg border border-red-300 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 transition-colors"
+              >
+                Delete my account
+              </button>
+            ) : (
+              <div className="space-y-3">
+                <p className="text-sm text-gray-700">
+                  Type <span className="font-mono font-bold">delete my account</span> to confirm:
+                </p>
+                <input
+                  type="text"
+                  value={deleteConfirm}
+                  onChange={(e) => setDeleteConfirm(e.target.value)}
+                  placeholder="delete my account"
+                  className="w-full rounded-lg border border-red-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-400/30"
+                />
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleDeleteAccount}
+                    disabled={deleteConfirm !== "delete my account" || deleting}
+                    className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-40 transition-colors"
+                  >
+                    {deleting ? "Deleting..." : "Permanently delete account"}
+                  </button>
+                  <button
+                    onClick={() => { setShowDelete(false); setDeleteConfirm(""); }}
+                    className="rounded-lg border border-gray-200 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+          </section>
         </div>
-      </div>
-
-      <div className="space-y-6">
-        {/* Change Password */}
-        <section className="bg-white rounded-xl border border-gray-200 p-6">
-          <h2 className="text-base font-semibold text-gray-900 mb-4">Change password</h2>
-          <form onSubmit={handlePasswordChange} className="space-y-3">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Current password</label>
-              <input
-                type="password"
-                value={currentPassword}
-                onChange={(e) => setCurrentPassword(e.target.value)}
-                required
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">New password</label>
-              <input
-                type="password"
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-                required
-                minLength={8}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Confirm new password</label>
-              <input
-                type="password"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                required
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
-              />
-            </div>
-            {passwordMsg && (
-              <p className={`text-sm ${passwordMsg.includes("successfully") ? "text-green-600" : "text-red-600"}`}>
-                {passwordMsg}
-              </p>
-            )}
-            <button
-              type="submit"
-              disabled={passwordSaving}
-              className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-40 transition-colors"
-            >
-              {passwordSaving ? "Saving…" : "Update password"}
-            </button>
-          </form>
-        </section>
-
-        {/* Notification Settings */}
-        <section className="bg-white rounded-xl border border-gray-200 p-6">
-          <h2 className="text-base font-semibold text-gray-900 mb-4">Email notifications</h2>
-          <form onSubmit={handleNotifSave} className="space-y-4">
-            <label className="flex items-center gap-3 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={notifEnabled}
-                onChange={(e) => setNotifEnabled(e.target.checked)}
-                className="w-4 h-4 text-brand-600 rounded border-gray-300"
-              />
-              <span className="text-sm font-medium text-gray-700">Send me daily match digests</span>
-            </label>
-
-            {notifEnabled && (
-              <>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Notification email <span className="text-gray-400 font-normal">(leave blank to use account email)</span>
-                  </label>
-                  <input
-                    type="email"
-                    value={notifEmail}
-                    onChange={(e) => setNotifEmail(e.target.value)}
-                    placeholder="you@example.com"
-                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Minimum match score: <span className="font-semibold text-brand-600">{Math.round(parseFloat(notifMinScore) * 100)}%</span>
-                  </label>
-                  <input
-                    type="range"
-                    min="0.4"
-                    max="0.95"
-                    step="0.05"
-                    value={notifMinScore}
-                    onChange={(e) => setNotifMinScore(e.target.value)}
-                    className="w-full accent-brand-600"
-                  />
-                  <div className="flex justify-between text-xs text-gray-400 mt-0.5">
-                    <span>40% (more results)</span>
-                    <span>95% (only the best)</span>
-                  </div>
-                </div>
-              </>
-            )}
-
-            {notifMsg && (
-              <p className={`text-sm ${notifMsg.includes("saved") ? "text-green-600" : "text-red-600"}`}>
-                {notifMsg}
-              </p>
-            )}
-            <button
-              type="submit"
-              disabled={notifSaving}
-              className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-40 transition-colors"
-            >
-              {notifSaving ? "Saving…" : "Save notifications"}
-            </button>
-          </form>
-        </section>
-
-        {/* Job Alerts */}
-        <section className="bg-white rounded-xl border border-gray-200 p-6">
-          <h2 className="text-base font-semibold text-gray-900 mb-1">Job alerts</h2>
-          <p className="text-sm text-gray-500 mb-4">
-            Create saved searches. We'll email you when new matching jobs are found (checked every 6 hours).
-          </p>
-
-          {/* Existing alerts */}
-          {alerts.length > 0 && (
-            <div className="space-y-2 mb-5">
-              {alerts.map((alert) => (
-                <div
-                  key={alert.id}
-                  className={`flex items-center justify-between rounded-lg border px-4 py-3 text-sm ${
-                    alert.is_active ? "border-gray-200 bg-gray-50" : "border-gray-100 bg-gray-50/50 opacity-60"
-                  }`}
-                >
-                  <div className="flex-1 min-w-0">
-                    <div className="font-medium text-gray-900 truncate">
-                      {[
-                        alert.title && `"${alert.title}"`,
-                        alert.location,
-                        alert.remote === true ? "Remote" : alert.remote === false ? "Onsite" : null,
-                      ]
-                        .filter(Boolean)
-                        .join(" · ") || "All matches"}
-                    </div>
-                    <div className="text-xs text-gray-400 mt-0.5">
-                      Min score: {Math.round(alert.min_score * 100)}%
-                      {alert.last_alerted_at && ` · Last sent: ${new Date(alert.last_alerted_at).toLocaleDateString()}`}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2 ml-3 flex-shrink-0">
-                    <button
-                      onClick={() => handleToggleAlert(alert.id)}
-                      className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
-                        alert.is_active
-                          ? "text-yellow-700 bg-yellow-50 hover:bg-yellow-100"
-                          : "text-green-700 bg-green-50 hover:bg-green-100"
-                      }`}
-                    >
-                      {alert.is_active ? "Pause" : "Resume"}
-                    </button>
-                    <button
-                      onClick={() => handleDeleteAlert(alert.id)}
-                      className="px-2 py-1 rounded text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 transition-colors"
-                    >
-                      Delete
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* New alert form */}
-          <form onSubmit={handleCreateAlert} className="space-y-3">
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Job title keyword</label>
-                <input
-                  type="text"
-                  value={alertTitle}
-                  onChange={(e) => setAlertTitle(e.target.value)}
-                  placeholder="e.g. Backend Engineer"
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Location</label>
-                <input
-                  type="text"
-                  value={alertLocation}
-                  onChange={(e) => setAlertLocation(e.target.value)}
-                  placeholder="e.g. San Francisco"
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
-                />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Remote preference</label>
-                <select
-                  value={alertRemote}
-                  onChange={(e) => setAlertRemote(e.target.value)}
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
-                >
-                  <option value="any">Any</option>
-                  <option value="true">Remote only</option>
-                  <option value="false">Onsite only</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">
-                  Min score: {Math.round(parseFloat(alertMinScore) * 100)}%
-                </label>
-                <input
-                  type="range"
-                  min="0.4"
-                  max="0.95"
-                  step="0.05"
-                  value={alertMinScore}
-                  onChange={(e) => setAlertMinScore(e.target.value)}
-                  className="w-full accent-brand-600 mt-1.5"
-                />
-              </div>
-            </div>
-
-            {alertMsg && (
-              <p className={`text-sm ${alertMsg.includes("created") ? "text-green-600" : "text-red-600"}`}>
-                {alertMsg}
-              </p>
-            )}
-            <button
-              type="submit"
-              disabled={alertCreating}
-              className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-40 transition-colors"
-            >
-              {alertCreating ? "Creating…" : "Create alert"}
-            </button>
-          </form>
-        </section>
-
-        {/* Danger Zone */}
-        <section className="bg-white rounded-xl border border-red-200 p-6">
-          <h2 className="text-base font-semibold text-red-700 mb-1">Danger zone</h2>
-          <p className="text-sm text-gray-500 mb-4">
-            Deleting your account removes all your data permanently. This cannot be undone.
-          </p>
-          {!showDelete ? (
-            <button
-              onClick={() => setShowDelete(true)}
-              className="rounded-lg border border-red-300 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 transition-colors"
-            >
-              Delete my account
-            </button>
-          ) : (
-            <div className="space-y-3">
-              <p className="text-sm text-gray-700">
-                Type <span className="font-mono font-semibold">delete my account</span> to confirm:
-              </p>
-              <input
-                type="text"
-                value={deleteConfirm}
-                onChange={(e) => setDeleteConfirm(e.target.value)}
-                placeholder="delete my account"
-                className="w-full rounded-lg border border-red-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-400"
-              />
-              <div className="flex gap-2">
-                <button
-                  onClick={handleDeleteAccount}
-                  disabled={deleteConfirm !== "delete my account" || deleting}
-                  className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-40 transition-colors"
-                >
-                  {deleting ? "Deleting…" : "Permanently delete account"}
-                </button>
-                <button
-                  onClick={() => { setShowDelete(false); setDeleteConfirm(""); }}
-                  className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          )}
-        </section>
       </div>
     </div>
   );
