@@ -8,6 +8,7 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.models.company import Company
 from app.models.job import Job
 from app.models.match import Match, SavedJob
 from app.models.user import User
@@ -17,6 +18,22 @@ from app.services.auth import get_current_user
 VALID_EVENT_TYPES = {"job_viewed", "job_dismissed", "job_applied"}
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
+
+
+async def _company_logos(company_names: set[str], db: AsyncSession) -> dict[str, str]:
+    """Look up logo_url for a set of company names. Returns {name_lower: url}.
+    Fails gracefully if the logo_url column doesn't exist yet (migration 006)."""
+    if not company_names:
+        return {}
+    try:
+        result = await db.execute(
+            select(Company.name, Company.logo_url)
+            .where(func.lower(Company.name).in_([n.lower() for n in company_names]))
+            .where(Company.logo_url.is_not(None))
+        )
+        return {name.lower(): url for name, url in result.all()}
+    except Exception:
+        return {}
 
 _TAG_RE = re.compile(r"<[^>]+>")
 _WS_RE = re.compile(r"\s+")
@@ -36,6 +53,7 @@ class JobResponse(BaseModel):
     score: Optional[float] = None
     explanation: Optional[str] = None
     description_preview: Optional[str] = None
+    logo_url: Optional[str] = None
 
     model_config = {"from_attributes": True}
 
@@ -54,6 +72,7 @@ def _build_job_response(
     job: Job,
     score: Optional[float] = None,
     explanation: Optional[str] = None,
+    logo_url: Optional[str] = None,
 ) -> JobResponse:
     preview = None
     if job.description:
@@ -74,6 +93,7 @@ def _build_job_response(
         score=score,
         explanation=explanation,
         description_preview=preview,
+        logo_url=logo_url,
     )
 
 
@@ -112,7 +132,11 @@ async def get_matches(
 
     stmt = stmt.order_by(desc(Match.score)).limit(limit).offset(offset)
     rows = (await db.execute(stmt)).all()
-    return [_build_job_response(job, score, explanation) for job, score, explanation in rows]
+    logos = await _company_logos({job.company for job, _, _ in rows}, db)
+    return [
+        _build_job_response(job, score, explanation, logos.get(job.company.lower()))
+        for job, score, explanation in rows
+    ]
 
 
 @router.get("/matches/status")
@@ -199,8 +223,9 @@ async def search_jobs(
         )).all()
         match_scores = {jid: (score, explanation) for jid, score, explanation in match_rows}
 
+    logos = await _company_logos({job.company for job, _ in rows}, db)
     return [
-        _build_job_response(job, *match_scores.get(job.id, (None, None)))
+        _build_job_response(job, *match_scores.get(job.id, (None, None)), logos.get(job.company.lower()))
         for job, _ in rows
     ]
 

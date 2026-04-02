@@ -8,7 +8,7 @@ from slowapi.errors import RateLimitExceeded
 
 from app.config import settings
 from app.limiter import limiter
-from app.routers import admin, analytics, applications, auth, jobs, profile, users
+from app.routers import admin, alerts, analytics, applications, auth, jobs, profile, resumes, users
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +58,8 @@ app.include_router(users.router)
 app.include_router(profile.router)
 app.include_router(jobs.router)
 app.include_router(applications.router)
+app.include_router(alerts.router)
+app.include_router(resumes.router)
 app.include_router(analytics.router)
 app.include_router(admin.router)
 

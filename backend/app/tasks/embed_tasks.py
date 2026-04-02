@@ -75,6 +75,39 @@ def embed_profile(self, profile_id: int):
     _run(_inner())
 
 
+@celery_app.task(name="app.tasks.embed_tasks.embed_resume", bind=True, max_retries=3)
+def embed_resume(self, resume_id: int):
+    """Compute and persist the embedding for a single resume version."""
+    from sqlalchemy import select
+
+    from app.database import task_session
+    from app.models.resume import Resume
+    from app.services.embedding import embed_profile as compute_embedding
+
+    async def _inner():
+        async with task_session() as db:
+            result = await db.execute(select(Resume).where(Resume.id == resume_id))
+            resume = result.scalar_one_or_none()
+            if not resume:
+                return
+            try:
+                # Build a lightweight object that embed_profile can work with
+                class _Proxy:
+                    pass
+                proxy = _Proxy()
+                proxy.resume_text = resume.resume_text
+                proxy.desired_titles = []
+                proxy.skills = []
+                resume.embedding = compute_embedding(proxy)
+                await db.commit()
+                logger.info("[embed_resume] resume_id=%d done", resume_id)
+            except Exception as exc:
+                logger.error("[embed_resume] resume_id=%d failed: %s", resume_id, exc)
+                raise self.retry(exc=exc, countdown=30)
+
+    _run(_inner())
+
+
 @celery_app.task(name="app.tasks.embed_tasks.compute_user_matches", bind=True, max_retries=2)
 def compute_user_matches(self, user_id: int):
     """Run vector similarity search and upsert match scores for one user."""

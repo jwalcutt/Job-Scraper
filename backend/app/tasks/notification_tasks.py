@@ -96,6 +96,109 @@ def send_digest_for_user(user_id: int) -> str:
     return _run(_inner())
 
 
+@celery_app.task(name="app.tasks.notification_tasks.check_job_alerts")
+def check_job_alerts() -> str:
+    """
+    For each active job alert, find new matching jobs since last_alerted_at
+    and send a digest email. Uses the same vector + filter pipeline as the jobs feed.
+    """
+    from sqlalchemy import and_, desc, or_, select
+
+    from app.database import AsyncSessionLocal
+    from app.models.job import Job
+    from app.models.job_alert import JobAlert
+    from app.models.match import Match
+    from app.models.profile import Profile
+    from app.models.user import User
+    from app.services.notifications import send_match_digest
+
+    async def _inner() -> str:
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(
+                select(JobAlert).where(JobAlert.is_active.is_(True))
+            )
+            alerts = result.scalars().all()
+
+            if not alerts:
+                return "No active alerts"
+
+            sent_count = 0
+            for alert in alerts:
+                # Load user and profile
+                user_result = await db.execute(select(User).where(User.id == alert.user_id))
+                user = user_result.scalar_one_or_none()
+                if not user:
+                    continue
+
+                profile_result = await db.execute(
+                    select(Profile).where(Profile.user_id == alert.user_id)
+                )
+                profile = profile_result.scalar_one_or_none()
+
+                # Build query: matches above min_score + alert filters
+                conditions = [Match.user_id == alert.user_id, Match.score >= alert.min_score]
+                if alert.last_alerted_at:
+                    conditions.append(Match.computed_at > alert.last_alerted_at)
+
+                stmt = (
+                    select(Match, Job)
+                    .join(Job, Job.id == Match.job_id)
+                    .where(and_(*conditions))
+                )
+
+                # Apply alert-specific filters
+                if alert.title:
+                    stmt = stmt.where(Job.title.ilike(f"%{alert.title}%"))
+                if alert.location:
+                    stmt = stmt.where(
+                        or_(
+                            Job.location.ilike(f"%{alert.location}%"),
+                            Job.is_remote.is_(True),
+                        )
+                    )
+                if alert.remote is not None:
+                    stmt = stmt.where(Job.is_remote == alert.remote)
+
+                stmt = stmt.order_by(desc(Match.score)).limit(10)
+                rows = (await db.execute(stmt)).all()
+
+                if not rows:
+                    continue
+
+                matches_data = [
+                    {
+                        "title": job.title,
+                        "company": job.company,
+                        "location": job.location,
+                        "score": match.score,
+                        "url": job.url,
+                        "explanation": match.explanation,
+                    }
+                    for match, job in rows
+                ]
+
+                to_email = (
+                    profile.notification_email if profile and profile.notification_email
+                    else user.email
+                )
+                sent = send_match_digest(
+                    to_email=to_email,
+                    matches=matches_data,
+                    user_name=profile.full_name if profile else None,
+                )
+
+                if sent:
+                    alert.last_alerted_at = datetime.now(timezone.utc)
+                    sent_count += 1
+
+            await db.commit()
+            msg = f"Checked {len(alerts)} alerts, sent {sent_count} digests"
+            logger.info(msg)
+            return msg
+
+    return _run(_inner())
+
+
 @celery_app.task(name="app.tasks.notification_tasks.send_all_digests")
 def send_all_digests() -> str:
     """

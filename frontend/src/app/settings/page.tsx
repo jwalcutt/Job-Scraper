@@ -11,6 +11,17 @@ interface NotificationSettings {
   notification_min_score: number;
 }
 
+interface JobAlert {
+  id: number;
+  title: string | null;
+  location: string | null;
+  remote: boolean | null;
+  min_score: number;
+  is_active: boolean;
+  last_alerted_at: string | null;
+  created_at: string;
+}
+
 export default function SettingsPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
@@ -34,6 +45,15 @@ export default function SettingsPage() {
   const [notifMsg, setNotifMsg] = useState("");
   const [notifSaving, setNotifSaving] = useState(false);
 
+  // Job Alerts
+  const [alerts, setAlerts] = useState<JobAlert[]>([]);
+  const [alertTitle, setAlertTitle] = useState("");
+  const [alertLocation, setAlertLocation] = useState("");
+  const [alertRemote, setAlertRemote] = useState<string>("any");
+  const [alertMinScore, setAlertMinScore] = useState("0.6");
+  const [alertMsg, setAlertMsg] = useState("");
+  const [alertCreating, setAlertCreating] = useState(false);
+
   // Delete account
   const [showDelete, setShowDelete] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState("");
@@ -41,14 +61,19 @@ export default function SettingsPage() {
 
   useEffect(() => {
     api.get<NotificationSettings>("/users/me/notifications")
-      .then((data) => {
-        setNotifSettings(data);
-        setNotifEnabled(data.notifications_enabled);
-        setNotifEmail(data.notification_email ?? "");
-        setNotifMinScore(String(data.notification_min_score));
+      .then((notif) => {
+        setNotifSettings(notif);
+        setNotifEnabled(notif.notifications_enabled);
+        setNotifEmail(notif.notification_email ?? "");
+        setNotifMinScore(String(notif.notification_min_score));
         setLoading(false);
       })
       .catch(() => router.push("/login"));
+
+    // Alerts fetch is independent — don't redirect on failure
+    api.get<JobAlert[]>("/alerts")
+      .then(setAlerts)
+      .catch(() => {});
   }, [router]);
 
   async function handlePasswordChange(e: React.FormEvent) {
@@ -94,6 +119,48 @@ export default function SettingsPage() {
       setNotifMsg("Failed to save notification settings.");
     } finally {
       setNotifSaving(false);
+    }
+  }
+
+  async function handleCreateAlert(e: React.FormEvent) {
+    e.preventDefault();
+    setAlertCreating(true);
+    setAlertMsg("");
+    try {
+      const newAlert = await api.post<JobAlert>("/alerts", {
+        title: alertTitle || null,
+        location: alertLocation || null,
+        remote: alertRemote === "any" ? null : alertRemote === "true",
+        min_score: parseFloat(alertMinScore) || 0.6,
+      });
+      setAlerts((prev) => [newAlert, ...prev]);
+      setAlertTitle("");
+      setAlertLocation("");
+      setAlertRemote("any");
+      setAlertMinScore("0.6");
+      setAlertMsg("Alert created. You'll receive emails when matching jobs are found.");
+    } catch {
+      setAlertMsg("Failed to create alert.");
+    } finally {
+      setAlertCreating(false);
+    }
+  }
+
+  async function handleDeleteAlert(alertId: number) {
+    try {
+      await api.delete(`/alerts/${alertId}`);
+      setAlerts((prev) => prev.filter((a) => a.id !== alertId));
+    } catch {
+      // silent
+    }
+  }
+
+  async function handleToggleAlert(alertId: number) {
+    try {
+      const updated = await api.patch<JobAlert>(`/alerts/${alertId}`, {});
+      setAlerts((prev) => prev.map((a) => (a.id === alertId ? updated : a)));
+    } catch {
+      // silent
     }
   }
 
@@ -239,6 +306,129 @@ export default function SettingsPage() {
               className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-40 transition-colors"
             >
               {notifSaving ? "Saving…" : "Save notifications"}
+            </button>
+          </form>
+        </section>
+
+        {/* Job Alerts */}
+        <section className="bg-white rounded-xl border border-gray-200 p-6">
+          <h2 className="text-base font-semibold text-gray-900 mb-1">Job alerts</h2>
+          <p className="text-sm text-gray-500 mb-4">
+            Create saved searches. We'll email you when new matching jobs are found (checked every 6 hours).
+          </p>
+
+          {/* Existing alerts */}
+          {alerts.length > 0 && (
+            <div className="space-y-2 mb-5">
+              {alerts.map((alert) => (
+                <div
+                  key={alert.id}
+                  className={`flex items-center justify-between rounded-lg border px-4 py-3 text-sm ${
+                    alert.is_active ? "border-gray-200 bg-gray-50" : "border-gray-100 bg-gray-50/50 opacity-60"
+                  }`}
+                >
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium text-gray-900 truncate">
+                      {[
+                        alert.title && `"${alert.title}"`,
+                        alert.location,
+                        alert.remote === true ? "Remote" : alert.remote === false ? "Onsite" : null,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ") || "All matches"}
+                    </div>
+                    <div className="text-xs text-gray-400 mt-0.5">
+                      Min score: {Math.round(alert.min_score * 100)}%
+                      {alert.last_alerted_at && ` · Last sent: ${new Date(alert.last_alerted_at).toLocaleDateString()}`}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 ml-3 flex-shrink-0">
+                    <button
+                      onClick={() => handleToggleAlert(alert.id)}
+                      className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
+                        alert.is_active
+                          ? "text-yellow-700 bg-yellow-50 hover:bg-yellow-100"
+                          : "text-green-700 bg-green-50 hover:bg-green-100"
+                      }`}
+                    >
+                      {alert.is_active ? "Pause" : "Resume"}
+                    </button>
+                    <button
+                      onClick={() => handleDeleteAlert(alert.id)}
+                      className="px-2 py-1 rounded text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 transition-colors"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* New alert form */}
+          <form onSubmit={handleCreateAlert} className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Job title keyword</label>
+                <input
+                  type="text"
+                  value={alertTitle}
+                  onChange={(e) => setAlertTitle(e.target.value)}
+                  placeholder="e.g. Backend Engineer"
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Location</label>
+                <input
+                  type="text"
+                  value={alertLocation}
+                  onChange={(e) => setAlertLocation(e.target.value)}
+                  placeholder="e.g. San Francisco"
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Remote preference</label>
+                <select
+                  value={alertRemote}
+                  onChange={(e) => setAlertRemote(e.target.value)}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                >
+                  <option value="any">Any</option>
+                  <option value="true">Remote only</option>
+                  <option value="false">Onsite only</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Min score: {Math.round(parseFloat(alertMinScore) * 100)}%
+                </label>
+                <input
+                  type="range"
+                  min="0.4"
+                  max="0.95"
+                  step="0.05"
+                  value={alertMinScore}
+                  onChange={(e) => setAlertMinScore(e.target.value)}
+                  className="w-full accent-brand-600 mt-1.5"
+                />
+              </div>
+            </div>
+
+            {alertMsg && (
+              <p className={`text-sm ${alertMsg.includes("created") ? "text-green-600" : "text-red-600"}`}>
+                {alertMsg}
+              </p>
+            )}
+            <button
+              type="submit"
+              disabled={alertCreating}
+              className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-40 transition-colors"
+            >
+              {alertCreating ? "Creating…" : "Create alert"}
             </button>
           </form>
         </section>

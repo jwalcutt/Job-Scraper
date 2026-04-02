@@ -3,13 +3,12 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
-from sqlalchemy import case, desc, func, select
+from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models.job import Job
 from app.models.match import Application, Match
-from app.models.profile import Profile
 from app.models.user import User
 from app.services.auth import get_current_user
 

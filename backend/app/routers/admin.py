@@ -242,3 +242,47 @@ def trigger_rerank_user(user_id: int, body: ReRankRequest = ReRankRequest()):
     from app.tasks.llm_tasks import rerank_matches_for_user
     result = rerank_matches_for_user.delay(user_id, top_k=body.top_k)
     return {"task_id": result.id, "status": "queued", "user_id": user_id}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Data quality endpoints
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.post("/data-quality/prune", dependencies=[Depends(require_admin)])
+def trigger_prune_jobs():
+    """Delete expired jobs older than 60 days with no saves or applications."""
+    from app.tasks.data_quality_tasks import prune_expired_jobs
+    result = prune_expired_jobs.delay()
+    return {"task_id": result.id, "status": "queued", "description": "prune expired jobs"}
+
+
+@router.post("/data-quality/deduplicate", dependencies=[Depends(require_admin)])
+def trigger_deduplicate():
+    """Find and remove near-duplicate job postings across sources."""
+    from app.tasks.data_quality_tasks import deduplicate_jobs
+    result = deduplicate_jobs.delay()
+    return {"task_id": result.id, "status": "queued", "description": "deduplicate jobs"}
+
+
+@router.post("/data-quality/logos", dependencies=[Depends(require_admin)])
+def trigger_fetch_logos():
+    """Fetch company logos from Clearbit for companies missing logo_url."""
+    from app.tasks.data_quality_tasks import fetch_company_logos
+    result = fetch_company_logos.delay()
+    return {"task_id": result.id, "status": "queued", "description": "fetch company logos"}
+
+
+@router.post("/data-quality/enrich", dependencies=[Depends(require_admin)])
+def trigger_enrich_descriptions():
+    """Fetch full descriptions for jobs with very short ones."""
+    from app.tasks.data_quality_tasks import enrich_short_descriptions
+    result = enrich_short_descriptions.delay()
+    return {"task_id": result.id, "status": "queued", "description": "enrich short descriptions"}
+
+
+@router.post("/alerts/check", dependencies=[Depends(require_admin)])
+def trigger_check_alerts():
+    """Manually trigger job alert checking for all active alerts."""
+    from app.tasks.notification_tasks import check_job_alerts
+    result = check_job_alerts.delay()
+    return {"task_id": result.id, "status": "queued", "description": "check job alerts"}

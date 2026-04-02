@@ -18,6 +18,8 @@ class Company(Base):
     # Detected ATS type: workday, icims, greenhouse, lever, taleo, successfactors, generic
     ats_type: Mapped[Optional[str]] = mapped_column(String(64), index=True)
 
+    logo_url: Mapped[Optional[str]] = mapped_column(Text)
+
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     last_scraped_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(

@@ -12,6 +12,7 @@ celery_app = Celery(
         "app.tasks.scrape_tasks",
         "app.tasks.llm_tasks",
         "app.tasks.notification_tasks",
+        "app.tasks.data_quality_tasks",
     ],
 )
 
@@ -46,6 +47,33 @@ celery_app.conf.update(
             "task": "app.tasks.notification_tasks.send_all_digests",
             "schedule": 86400.0,
             "options": {"countdown": 14400},
+        },
+        # 5. Check job alerts every 6 hours
+        "check-job-alerts": {
+            "task": "app.tasks.notification_tasks.check_job_alerts",
+            "schedule": 21600.0,  # 6 hours
+        },
+        # 6. Prune expired jobs weekly (runs once per day, only deletes old ones)
+        "prune-expired-jobs-weekly": {
+            "task": "app.tasks.data_quality_tasks.prune_expired_jobs",
+            "schedule": 604800.0,  # 7 days
+        },
+        # 7. Deduplicate jobs weekly
+        "deduplicate-jobs-weekly": {
+            "task": "app.tasks.data_quality_tasks.deduplicate_jobs",
+            "schedule": 604800.0,
+            "options": {"countdown": 3600},  # 1h after prune
+        },
+        # 8. Fetch company logos weekly
+        "fetch-logos-weekly": {
+            "task": "app.tasks.data_quality_tasks.fetch_company_logos",
+            "schedule": 604800.0,
+        },
+        # 9. Enrich short job descriptions daily (after scrape + embed)
+        "enrich-short-descriptions-daily": {
+            "task": "app.tasks.data_quality_tasks.enrich_short_descriptions",
+            "schedule": 86400.0,
+            "options": {"countdown": 16200},  # 4.5h after scrape
         },
     },
 )

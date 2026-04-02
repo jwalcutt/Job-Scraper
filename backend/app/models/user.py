@@ -21,3 +21,5 @@ class User(Base):
     saved_jobs: Mapped[list["SavedJob"]] = relationship(back_populates="user", cascade="all, delete-orphan")  # noqa: F821
     applications: Mapped[list["Application"]] = relationship(back_populates="user", cascade="all, delete-orphan")  # noqa: F821
     matches: Mapped[list["Match"]] = relationship(back_populates="user", cascade="all, delete-orphan")  # noqa: F821
+    job_alerts: Mapped[list["JobAlert"]] = relationship(back_populates="user", cascade="all, delete-orphan")  # noqa: F821
+    resumes: Mapped[list["Resume"]] = relationship(back_populates="user", cascade="all, delete-orphan")  # noqa: F821
